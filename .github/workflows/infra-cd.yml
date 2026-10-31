@@ -1,0 +1,98 @@
+name: Infrastructure CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_bootstrap:
+        description: "Deploy subscription bootstrap (create rg-agent-platform-demo)"
+        type: boolean
+        default: false
+      confirm_destructive:
+        description: "Type DEPLOY to confirm infrastructure deployment"
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: infra-cd-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy infrastructure (demo)
+    runs-on: ubuntu-latest
+    environment: demo
+    steps:
+      - name: Confirm deployment intent
+        run: |
+          if [ "${{ inputs.confirm_destructive }}" != "DEPLOY" ]; then
+            echo "Refusing to deploy. Set confirm_destructive=DEPLOY to proceed."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bootstrap resource group
+        if: ${{ inputs.run_bootstrap }}
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az deployment sub create \
+              --location australiasoutheast \
+              --template-file infra/bootstrap/main.bicep \
+              --parameters resourceGroupName=rg-agent-platform-demo location=australiasoutheast
+
+      # Empty .bicepparam defaults are for file evaluation only — gate before deploy.
+      - name: Validate deploy secrets
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          set -euo pipefail
+          chmod +x infra/scripts/validate-deploy-secrets.sh
+          ./infra/scripts/validate-deploy-secrets.sh infra/parameters/demo.bicepparam
+
+      # Option A secret ownership: Bicep declares postgres-password + llm-api-key.
+      # Always pass all three secure params so a CA redeploy does not wipe LLM or app DB secrets.
+      - name: Deploy resource group infrastructure
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az deployment group create \
+              --resource-group rg-agent-platform-demo \
+              --name "eap-demo-$(date +%Y%m%d%H%M%S)" \
+              --template-file infra/main.bicep \
+              --parameters infra/parameters/demo.bicepparam \
+              --parameters \
+                postgresAdminPassword="${POSTGRES_ADMIN_PASSWORD}" \
+                postgresAppPassword="${POSTGRES_APP_PASSWORD:-}" \
+                llmApiKey="${LLM_API_KEY:-}"
+
+      - name: Print non-sensitive outputs
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az deployment group show \
+              --resource-group rg-agent-platform-demo \
+              --name "$(az deployment group list -g rg-agent-platform-demo --query '[0].name' -o tsv)" \
+              --query properties.outputs \
+              -o json

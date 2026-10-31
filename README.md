@@ -139,14 +139,34 @@ docs/           # Architecture, decisions, evaluation
 
 Environment variables will be documented in `.env.example`. Real credentials and business files will not be committed.
 
-## CI/CD and deployment (planned)
+## CI/CD and deployment
 
-- **Pull requests:** Python lint/type checks/tests; frontend lint/type checks/tests/build; Bicep validation.
-- **Main branch:** build and deploy frontend and backend; execute controlled database migrations; run smoke tests.
-- **Hosting:** Azure Static Web Apps (frontend), Azure Container Apps (FastAPI), Azure Database for PostgreSQL, Azure Blob Storage.
-- **Observability:** structured logs, error tracking, task latency, and AI usage metrics.
+**Single Azure environment:** public portfolio **demo** only (no separate Azure staging/production yet).
 
-**Live demo:** Coming soon. Demo access and limitations will be documented here once deployed.
+```text
+Local Development → Pull Request CI → Merge to Main → Azure Demo
+```
+
+| Layer | Detail |
+| --- | --- |
+| Azure resource group | `rg-agent-platform-demo` |
+| Bicep parameters | [`infra/parameters/demo.bicepparam`](infra/parameters/demo.bicepparam) |
+| GitHub Environment | `demo` |
+| Bicep `environment` / tags | `demo` (modules stay reusable for future `staging` / `production` param files) |
+
+Infrastructure as Code: [`infra/`](infra/). Full ops guide: **[`infra/README.md`](infra/README.md)**.
+
+| Workflow | Purpose |
+| --- | --- |
+| `.github/workflows/infra-ci.yml` | Bicep build/lint on `infra/**` (PR / push) |
+| `.github/workflows/infra-cd.yml` | Manual infra deploy to Environment `demo` |
+| `.github/workflows/backend-cd.yml` | ACR build + Container App update (skips until `backend/Dockerfile`) |
+| `.github/workflows/frontend-cd.yml` | SWA deploy (skips until `frontend/package.json`) |
+
+- **Hosting (planned live):** Static Web Apps (`eastasia`), Container Apps + PostgreSQL + Blob (`australiasoutheast`).
+- **Observability:** Application Insights + Log Analytics; Python apps still need OpenTelemetry instrumentation.
+
+**Live demo:** Coming soon. Public demo will use synthetic data, rate limits, and LLM usage caps (see `infra/README.md`). Do not create Azure resources until an explicit deploy is approved.
 
 ## Documentation
 
