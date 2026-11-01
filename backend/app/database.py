@@ -10,7 +10,6 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 
-
 def check_database():
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
