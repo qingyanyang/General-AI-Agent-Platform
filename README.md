@@ -125,19 +125,24 @@ Planned metrics include extraction accuracy, amount reconciliation, quantity cor
 
 ## Local development
 
-> **Not available yet.** Setup commands will be added after the application scaffold and Docker Compose configuration are committed.
-
-Expected layout:
-
 ```text
-frontend/       # React + TypeScript
+frontend/       # React + TypeScript (Vite)
 backend/        # FastAPI application and tests
 infra/          # Azure Bicep modules and parameters
 docs/           # Architecture, decisions, evaluation
 .github/        # CI/CD workflows
 ```
 
-Environment variables will be documented in `.env.example`. Real credentials and business files will not be committed.
+### Frontend
+
+```bash
+cd frontend
+cp .env.example .env
+npm install
+npm run dev
+```
+
+See [`frontend/README.md`](frontend/README.md). Set `VITE_API_BASE_URL` to the API origin. Backend / Docker Compose setup will be documented when that scaffold lands.
 
 ## CI/CD and deployment
 
