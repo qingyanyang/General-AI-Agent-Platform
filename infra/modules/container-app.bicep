@@ -33,8 +33,11 @@ param databaseUrl string
 param postgresSchema string = 'public'
 
 @secure()
-@description('External LLM API key. Declared in Bicep secrets (IaC-owned) so redeploys do not wipe it.')
-param llmApiKey string
+@description('External LLM API key. Only used when enableLlmApiKey is true.')
+param llmApiKey string = ''
+
+@description('When true, declare ACA secret llm-api-key and env LLM_API_KEY. Do not use empty() on @secure() params — ARM cannot reliably test them.')
+param enableLlmApiKey bool = false
 
 @description('Container listen port.')
 param containerPort int = 8000
@@ -66,7 +69,68 @@ param corsAllowedOrigins string = 'http://localhost:5173'
 @description('Resource tags.')
 param tags object = {}
 
-// Option A — single secret owner: Bicep declares ALL app secrets.
+// ACA rejects empty secret values (ContainerAppSecretInvalid). Gate on non-secure bool, not empty(secure).
+var databaseSecret = [
+  {
+    name: 'database-url'
+    value: databaseUrl
+  }
+]
+
+var llmSecret = enableLlmApiKey ? [
+  {
+    name: 'llm-api-key'
+    value: llmApiKey
+  }
+] : []
+
+var baseEnv = [
+  {
+    name: 'ENVIRONMENT'
+    value: environmentName
+  }
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: appInsightsConnectionString
+  }
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: uamiClientId
+  }
+  {
+    name: 'DATABASE_URL'
+    secretRef: 'database-url'
+  }
+  {
+    name: 'POSTGRES_SCHEMA'
+    value: postgresSchema
+  }
+  {
+    name: 'AZURE_STORAGE_BLOB_ENDPOINT'
+    value: storageBlobEndpoint
+  }
+  {
+    name: 'AZURE_STORAGE_UPLOADS_CONTAINER'
+    value: 'uploads'
+  }
+  {
+    name: 'AZURE_STORAGE_OUTPUTS_CONTAINER'
+    value: 'outputs'
+  }
+  {
+    name: 'CORS_ALLOWED_ORIGINS'
+    value: corsAllowedOrigins
+  }
+]
+
+var llmEnv = enableLlmApiKey ? [
+  {
+    name: 'LLM_API_KEY'
+    secretRef: 'llm-api-key'
+  }
+] : []
+
+// Option A — single secret owner: Bicep declares ALL app secrets that are in use.
 // Public GHCR: no registries[] credentials (image must be pullable anonymously).
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
@@ -94,16 +158,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      secrets: [
-        {
-          name: 'database-url'
-          value: databaseUrl
-        }
-        {
-          name: 'llm-api-key'
-          value: llmApiKey
-        }
-      ]
+      secrets: concat(databaseSecret, llmSecret)
     }
     template: {
       containers: [
@@ -149,48 +204,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               timeoutSeconds: 5
             }
           ]
-          env: [
-            {
-              name: 'ENVIRONMENT'
-              value: environmentName
-            }
-            {
-              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-              value: appInsightsConnectionString
-            }
-            {
-              name: 'AZURE_CLIENT_ID'
-              value: uamiClientId
-            }
-            {
-              name: 'DATABASE_URL'
-              secretRef: 'database-url'
-            }
-            {
-              name: 'POSTGRES_SCHEMA'
-              value: postgresSchema
-            }
-            {
-              name: 'LLM_API_KEY'
-              secretRef: 'llm-api-key'
-            }
-            {
-              name: 'AZURE_STORAGE_BLOB_ENDPOINT'
-              value: storageBlobEndpoint
-            }
-            {
-              name: 'AZURE_STORAGE_UPLOADS_CONTAINER'
-              value: 'uploads'
-            }
-            {
-              name: 'AZURE_STORAGE_OUTPUTS_CONTAINER'
-              value: 'outputs'
-            }
-            {
-              name: 'CORS_ALLOWED_ORIGINS'
-              value: corsAllowedOrigins
-            }
-          ]
+          env: concat(baseEnv, llmEnv)
         }
       ]
       scale: {

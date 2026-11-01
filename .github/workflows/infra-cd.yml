@@ -82,12 +82,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          EXTRA_PARAMS=()
+          if [[ -n "${LLM_API_KEY:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
+            EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
+          fi
+
           az deployment group validate \
             --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
             --parameters "$PARAMETER_FILE" \
-            --parameters \
-              databaseUrl="$DATABASE_URL" \
-              llmApiKey="$LLM_API_KEY"
+            --parameters "databaseUrl=${DATABASE_URL}" \
+            ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]}"}
 
       - name: Deploy resource group infrastructure
         env:
@@ -100,13 +106,19 @@ jobs:
 
           echo "DEPLOYMENT_NAME=$DEPLOYMENT_NAME" >> "$GITHUB_ENV"
 
+          EXTRA_PARAMS=()
+          if [[ -n "${LLM_API_KEY:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
+            EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
+          fi
+
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --name "$DEPLOYMENT_NAME" \
+            --template-file infra/main.bicep \
             --parameters "$PARAMETER_FILE" \
-            --parameters \
-              databaseUrl="$DATABASE_URL" \
-              llmApiKey="$LLM_API_KEY"
+            --parameters "databaseUrl=${DATABASE_URL}" \
+            ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]}"}
 
       - name: Print non-sensitive outputs
         run: |

@@ -84,7 +84,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 1. **Bootstrap** — create `rg-agent-platform-demo`.
 2. **Phase 1** — `deployContainerApp = false`: LAW, App Insights, Storage, UAMI, CAE, SWA.
 3. **Manual once** — GitHub OIDC + RBAC; create Supabase project; push a **public** GHCR image.
-4. **Phase 2** — set `deployContainerApp = true`, `containerImage = 'ghcr.io/<user>/agent-platform-api:<tag>'`, supply `DATABASE_URL` + `LLM_API_KEY`, redeploy.
+4. **Phase 2** — set `deployContainerApp = true`, `containerImage = 'ghcr.io/<user>/agent-platform-api:<tag>'`, supply `DATABASE_URL` (and optionally `LLM_API_KEY`), redeploy.
 5. **Ongoing** — `backend-cd` (GHCR push + image update) / `frontend-cd`. Prefer app CD over full infra CD.
 
 ---
@@ -98,7 +98,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 | `AZURE_SUBSCRIPTION_ID` | Local `scripts/infra/deploy.sh` | Target subscription check |
 | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | GitHub OIDC | Azure login |
 | `DATABASE_URL` | When `deployContainerApp = true` | Supabase session-pooler URL → ACA secret `database-url` → env `DATABASE_URL` |
-| `LLM_API_KEY` | When `deployContainerApp = true` | ACA secret `llm-api-key` |
+| `LLM_API_KEY` | Optional | When set, scripts pass `enableLlmApiKey=true` + `llmApiKey` → ACA secret `llm-api-key`. Omit until LLM is wired. |
 | `containerImage` (param) | When `deployContainerApp = true` | Public `ghcr.io/...` reference |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | frontend-cd | SWA deploy |
 | `CONTAINER_APP_NAME` (GitHub var) | backend-cd | Image update target |
@@ -116,13 +116,13 @@ Application schema: `POSTGRES_SCHEMA=agent_platform` (non-secret env on the Cont
 
 ### Option A secret ownership
 
-Bicep declares **both** `database-url` and `llm-api-key`. Do not manage them via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
+Bicep declares `database-url` always (Phase 2) and `llm-api-key` only when `enableLlmApiKey=true` (ARM cannot reliably `empty()` a `@secure()` value). Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
 
 ### Validate before deploy
 
 ```bash
-export DATABASE_URL='...'   # Phase 2
-export LLM_API_KEY='...'    # Phase 2
+export DATABASE_URL='...'   # Phase 2 (required)
+# export LLM_API_KEY='...'  # optional until LLM integration
 ./infra/scripts/validate-deploy-secrets.sh infra/parameters/demo.bicepparam
 ```
 
@@ -136,7 +136,7 @@ Phase 1 (`deployContainerApp = false`) needs no DB/LLM secrets.
 export AZURE_SUBSCRIPTION_ID='...'
 # Phase 2:
 export DATABASE_URL='...'
-export LLM_API_KEY='...'
+# export LLM_API_KEY='...'   # optional
 bash scripts/infra/deploy.sh
 ```
 
@@ -148,7 +148,8 @@ az deployment group create \
   -g rg-agent-platform-demo \
   -f infra/main.bicep \
   -p infra/parameters/demo.bicepparam \
-  -p databaseUrl="$DATABASE_URL" llmApiKey="$LLM_API_KEY"
+  -p databaseUrl="$DATABASE_URL"
+# add llmApiKey="$LLM_API_KEY" when you have a key
 ```
 
 ---
@@ -196,11 +197,11 @@ Bicep no longer manages these resources; leaving them undeleted only incurs cost
 | Workflow | Role |
 | --- | --- |
 | `infra-ci.yml` | Bicep build/lint; optional what-if |
-| `infra-cd.yml` | Manual deploy; `DATABASE_URL` + `LLM_API_KEY` overrides |
+| `infra-cd.yml` | Manual deploy; `DATABASE_URL` override (+ optional `LLM_API_KEY`) |
 | `backend-cd.yml` | GHCR build/push; Container App image update; `/health` |
 | `frontend-cd.yml` | SWA deploy |
 
-**Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (Phase 2), `AZURE_STATIC_WEB_APPS_API_TOKEN`
+**Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (optional), `AZURE_STATIC_WEB_APPS_API_TOKEN`
 
 **Variables:** `CONTAINER_APP_NAME`, `VITE_API_BASE_URL`, optional `RUN_INFRA_WHAT_IF`
 

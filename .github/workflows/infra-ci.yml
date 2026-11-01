@@ -93,10 +93,14 @@ jobs:
         with:
           inlineScript: |
             set -euo pipefail
+            EXTRA_PARAMS=()
+            if [[ -n "${LLM_API_KEY:-}" ]]; then
+              EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
+              EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
+            fi
             az deployment group what-if \
               --resource-group rg-agent-platform-demo \
               --template-file infra/main.bicep \
               --parameters infra/parameters/demo.bicepparam \
-              --parameters \
-                databaseUrl="${DATABASE_URL:-}" \
-                llmApiKey="${LLM_API_KEY:-}"
+              --parameters "databaseUrl=${DATABASE_URL:-}" \
+              ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]}"}

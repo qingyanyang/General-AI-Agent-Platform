@@ -6,7 +6,7 @@ set -euo pipefail
 # 2. Optional: export AZURE_SUBSCRIPTION_ID="<subscription-id>"
 # 3. Phase 2 only:
 #      export DATABASE_URL='postgresql+psycopg://...'
-#      export LLM_API_KEY='...'
+#      export LLM_API_KEY='...'   # optional until LLM is wired
 # 4. bash scripts/infra/deploy.sh
 
 RG="rg-agent-platform-demo"
@@ -72,6 +72,7 @@ fi
 
 if [[ -n "${LLM_API_KEY:-}" ]]; then
   EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
+  EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
 fi
 
 # --------------------------------------------------
