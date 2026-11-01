@@ -22,12 +22,12 @@ param tags = {
 // Prefer building/encoding the URL in your secret store; never commit it.
 param databaseUrl = readEnvironmentVariable('DATABASE_URL', '')
 param llmApiKey = readEnvironmentVariable('LLM_API_KEY', '')
-param postgresSchema = 'agent_platform'
+param postgresSchema = 'public'
 
 // Phase 1: false — no Container App until a public GHCR image exists.
 // Phase 2: set true + containerImage = 'ghcr.io/<github-username>/agent-platform-api:<tag>'
-param deployContainerApp = false
-param containerImage = ''
+param deployContainerApp = true
+param containerImage = 'ghcr.io/qingyanyang/agent-platform-api:latest'
 
 param containerCpu = '0.25'
 param containerMemory = '0.5Gi'
