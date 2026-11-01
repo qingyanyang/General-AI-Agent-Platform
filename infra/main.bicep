@@ -20,7 +20,7 @@ param tags object = {}
 param databaseUrl string = ''
 
 @secure()
-@description('External LLM API key. IaC-owned ACA secret. CI: --parameters llmApiKey=...')
+@description('External LLM API key (optional). When non-empty, IaC-owned ACA secret llm-api-key. CI: --parameters llmApiKey=...')
 param llmApiKey string = ''
 
 @description('PostgreSQL schema used by FastAPI / Alembic (Supabase).')
