@@ -4,9 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       run_bootstrap:
-        description: "Deploy subscription bootstrap (create rg-agent-platform-demo)"
+        description: "Create resource group if needed"
         type: boolean
         default: false
+
       confirm_destructive:
         description: "Type DEPLOY to confirm infrastructure deployment"
         type: string
@@ -20,16 +21,26 @@ concurrency:
   group: infra-cd-demo
   cancel-in-progress: false
 
+env:
+  RESOURCE_GROUP: rg-agent-platform-demo
+  LOCATION: australiasoutheast
+  PARAMETER_FILE: infra/parameters/demo.bicepparam
+
 jobs:
   deploy:
     name: Deploy infrastructure (demo)
     runs-on: ubuntu-latest
     environment: demo
+
     steps:
       - name: Confirm deployment intent
+        env:
+          CONFIRMATION: ${{ inputs.confirm_destructive }}
         run: |
-          if [ "${{ inputs.confirm_destructive }}" != "DEPLOY" ]; then
-            echo "Refusing to deploy. Set confirm_destructive=DEPLOY to proceed."
+          set -euo pipefail
+
+          if [ "$CONFIRMATION" != "DEPLOY" ]; then
+            echo "ERROR: Type DEPLOY to confirm."
             exit 1
           fi
 
@@ -44,55 +55,98 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Bootstrap resource group
-        if: ${{ inputs.run_bootstrap }}
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            az deployment sub create \
-              --location australiasoutheast \
-              --template-file infra/bootstrap/main.bicep \
-              --parameters resourceGroupName=rg-agent-platform-demo location=australiasoutheast
+        if: inputs.run_bootstrap
+        run: |
+          set -euo pipefail
 
-      # Empty .bicepparam defaults are for file evaluation only — gate before deploy.
-      - name: Validate deploy secrets
+          az deployment sub create \
+            --location "$LOCATION" \
+            --template-file infra/bootstrap/main.bicep \
+            --parameters \
+              resourceGroupName="$RESOURCE_GROUP" \
+              location="$LOCATION"
+
+      - name: Validate deployment secrets
         env:
-          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
-          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           set -euo pipefail
-          chmod +x infra/scripts/validate-deploy-secrets.sh
-          ./infra/scripts/validate-deploy-secrets.sh infra/parameters/demo.bicepparam
 
-      # Option A secret ownership: Bicep declares postgres-password + llm-api-key.
-      # Always pass all three secure params so a CA redeploy does not wipe LLM or app DB secrets.
-      - name: Deploy resource group infrastructure
+          bash infra/scripts/validate-deploy-secrets.sh "$PARAMETER_FILE"
+
+      - name: Prepare secure deployment parameters
         env:
-          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
-          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            az deployment group create \
-              --resource-group rg-agent-platform-demo \
-              --name "eap-demo-$(date +%Y%m%d%H%M%S)" \
-              --template-file infra/main.bicep \
-              --parameters infra/parameters/demo.bicepparam \
-              --parameters \
-                postgresAdminPassword="${POSTGRES_ADMIN_PASSWORD}" \
-                postgresAppPassword="${POSTGRES_APP_PASSWORD:-}" \
-                llmApiKey="${LLM_API_KEY:-}"
+        run: |
+          set -euo pipefail
+
+          PARAMS_FILE="$(mktemp)"
+          chmod 600 "$PARAMS_FILE"
+
+          python3 - "$PARAMS_FILE" <<'PY'
+          import json
+          import os
+          import sys
+
+          parameters = {
+              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {
+                  "databaseUrl": {
+                      "value": os.environ.get("DATABASE_URL", "")
+                  },
+                  "llmApiKey": {
+                      "value": os.environ.get("LLM_API_KEY", "")
+                  }
+              }
+          }
+
+          with open(sys.argv[1], "w") as f:
+              json.dump(parameters, f)
+          PY
+
+          echo "DEPLOY_PARAMS_FILE=$PARAMS_FILE" >> "$GITHUB_ENV"
+
+      - name: Validate Bicep deployment
+        run: |
+          set -euo pipefail
+
+          az deployment group validate \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "$PARAMETER_FILE" \
+            --parameters @"$DEPLOY_PARAMS_FILE"
+
+      - name: Deploy resource group infrastructure
+        run: |
+          set -euo pipefail
+
+          DEPLOYMENT_NAME="eap-demo-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "DEPLOYMENT_NAME=$DEPLOYMENT_NAME" >> "$GITHUB_ENV"
+
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
+            --template-file infra/main.bicep \
+            --parameters "$PARAMETER_FILE" \
+            --parameters @"$DEPLOY_PARAMS_FILE"
 
       - name: Print non-sensitive outputs
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            az deployment group show \
-              --resource-group rg-agent-platform-demo \
-              --name "$(az deployment group list -g rg-agent-platform-demo --query '[0].name' -o tsv)" \
-              --query properties.outputs \
-              -o json
+        run: |
+          set -euo pipefail
+
+          az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
+            --query properties.outputs \
+            -o json
+
+      - name: Remove temporary parameter file
+        if: always()
+        run: |
+          if [ -n "${DEPLOY_PARAMS_FILE:-}" ]; then
+            rm -f "$DEPLOY_PARAMS_FILE"
+          fi

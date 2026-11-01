@@ -15,52 +15,21 @@ param prefix string = 'eap'
 @description('Resource tags applied to all resources.')
 param tags object = {}
 
-@description('PostgreSQL administrator login (migrations / bootstrap only — not used by the Container App runtime).')
-param postgresAdminLogin string = 'pgadmin'
+@secure()
+@description('Supabase PostgreSQL DATABASE_URL (prefer session pooler host for IPv4). Required when deployContainerApp is true. Never logged or outputted.')
+param databaseUrl string = ''
 
 @secure()
-@description('PostgreSQL administrator password. Local: export POSTGRES_ADMIN_PASSWORD. CI: override via --parameters.')
-param postgresAdminPassword string
-
-@description('Least-privilege application DB login used by FastAPI at runtime.')
-param postgresAppLogin string = 'eap_app'
-
-@secure()
-@description('Least-privilege application DB password. Create the role with scripts/create-postgres-app-user.sql before Phase 2. Empty is fine while deployContainerApp is false.')
-param postgresAppPassword string = ''
-
-@secure()
-@description('External LLM API key. IaC-owned secret (declared in Container App Bicep). CI: --parameters llmApiKey=...')
+@description('External LLM API key. IaC-owned ACA secret. CI: --parameters llmApiKey=...')
 param llmApiKey string = ''
 
-@description('PostgreSQL major version.')
-param postgresVersion string = '16'
+@description('PostgreSQL schema used by FastAPI / Alembic (Supabase).')
+param postgresSchema string = 'public'
 
-@description('PostgreSQL compute SKU.')
-param postgresSkuName string = 'Standard_B1ms'
-
-@description('PostgreSQL compute tier.')
-param postgresSkuTier string = 'Burstable'
-
-@description('PostgreSQL storage size in GB.')
-param postgresStorageSizeGb int = 32
-
-@description('PostgreSQL backup retention in days.')
-param postgresBackupRetentionDays int = 7
-
-@description('Database name (schemas via Alembic, not Bicep).')
-param postgresDatabaseName string = 'agent_platform_db'
-
-@description('Allow Azure services firewall rule (0.0.0.0). Module default false; demo.bicepparam may set true. Production MUST keep false.')
-param allowAzureServicesAccess bool = false
-
-@description('Extra PostgreSQL firewall rules: [{ name, startIpAddress, endIpAddress }].')
-param postgresFirewallRules array = []
-
-@description('When false (Phase 1), skip Container App until a real FastAPI image exists. UAMI + AcrPull still deploy.')
+@description('When false (Phase 1), skip Container App until a public GHCR image exists.')
 param deployContainerApp bool = false
 
-@description('Full image reference for the API Container App (required when deployContainerApp is true).')
+@description('Full public image reference, e.g. ghcr.io/<github-username>/agent-platform-api:<tag>. Required when deployContainerApp is true. No registry credentials (public pull).')
 param containerImage string = ''
 
 @description('Container CPU cores.')
@@ -83,9 +52,6 @@ param corsAllowedOrigins array = [
 @description('Static Web Apps SKU.')
 param staticWebAppSkuName string = 'Free'
 
-@description('ACR SKU.')
-param acrSkuName string = 'Basic'
-
 var uniqueToken = uniqueString(resourceGroup().id)
 var envShort = toLower(environment)
 var commonTags = union({
@@ -96,9 +62,7 @@ var commonTags = union({
 
 var logAnalyticsName = toLower('${prefix}-${envShort}-law')
 var appInsightsName = toLower('${prefix}-${envShort}-ai')
-var acrName = toLower('${prefix}${envShort}acr${uniqueToken}')
 var storageAccountName = toLower('${prefix}${envShort}st${uniqueToken}')
-var postgresServerName = toLower('${prefix}-${envShort}-pg-${uniqueToken}')
 var containerAppsEnvironmentName = toLower('${prefix}-${envShort}-cae')
 var containerAppName = toLower('${prefix}-${envShort}-api')
 var staticWebAppName = toLower('${prefix}-${envShort}-swa-${uniqueToken}')
@@ -126,16 +90,6 @@ module appInsights 'modules/app-insights.bicep' = {
   }
 }
 
-module containerRegistry 'modules/container-registry.bicep' = {
-  name: 'container-registry'
-  params: {
-    location: location
-    name: acrName
-    skuName: acrSkuName
-    tags: commonTags
-  }
-}
-
 module storage 'modules/storage.bicep' = {
   name: 'storage'
   params: {
@@ -143,26 +97,6 @@ module storage 'modules/storage.bicep' = {
     name: storageAccountName
     networkDefaultAction: 'Allow'
     corsAllowedOrigins: corsAllowedOrigins
-    tags: commonTags
-  }
-}
-
-module postgresql 'modules/postgresql.bicep' = {
-  name: 'postgresql'
-  params: {
-    location: location
-    serverName: postgresServerName
-    administratorLogin: postgresAdminLogin
-    administratorPassword: postgresAdminPassword
-    databaseName: postgresDatabaseName
-    postgresVersion: postgresVersion
-    skuName: postgresSkuName
-    skuTier: postgresSkuTier
-    storageSizeGb: postgresStorageSizeGb
-    backupRetentionDays: postgresBackupRetentionDays
-    publicNetworkAccess: 'Enabled'
-    allowAzureServicesAccess: allowAzureServicesAccess
-    firewallRules: postgresFirewallRules
     tags: commonTags
   }
 }
@@ -176,14 +110,13 @@ module managedIdentity 'modules/managed-identity.bicep' = {
   }
 }
 
-// AcrPull on UAMI BEFORE Container App. Blob RBAC when CA is deployed.
+// Blob Data Contributor on UAMI when Container App is deployed (no ACR / AcrPull).
 module identityRbac 'modules/identity-rbac.bicep' = {
   name: 'identity-rbac'
   params: {
     uamiPrincipalId: managedIdentity.outputs.principalId
     roleAssignmentNamePrefix: uamiName
     storageAccountName: storage.outputs.name
-    containerRegistryName: containerRegistry.outputs.name
     assignBlobDataContributor: deployContainerApp
   }
 }
@@ -210,7 +143,7 @@ module staticWebApp 'modules/static-web-app.bicep' = {
   }
 }
 
-// Phase 2: real FastAPI image required. Depends on AcrPull via identityRbac.
+// Phase 2: public GHCR image + Supabase DATABASE_URL required.
 module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
   name: 'container-app'
   params: {
@@ -218,17 +151,13 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     appName: containerAppName
     environmentId: containerAppEnv.outputs.id
     containerImage: containerImage
-    registryLoginServer: containerRegistry.outputs.loginServer
     uamiResourceId: managedIdentity.outputs.id
     uamiClientId: managedIdentity.outputs.clientId
     appInsightsConnectionString: appInsights.outputs.connectionString
     storageBlobEndpoint: storage.outputs.blobEndpoint
     environmentName: environment
-    postgresHost: postgresql.outputs.fqdn
-    postgresPort: '5432'
-    postgresDb: postgresql.outputs.databaseName
-    postgresUser: postgresAppLogin
-    postgresPassword: postgresAppPassword
+    databaseUrl: databaseUrl
+    postgresSchema: postgresSchema
     llmApiKey: llmApiKey
     containerCpu: containerCpu
     containerMemory: containerMemory
@@ -250,16 +179,8 @@ output logAnalyticsWorkspaceName string = logAnalytics.outputs.name
 output appInsightsName string = appInsights.outputs.name
 output appInsightsConnectionString string = appInsights.outputs.connectionString
 
-output containerRegistryName string = containerRegistry.outputs.name
-output containerRegistryLoginServer string = containerRegistry.outputs.loginServer
-
 output storageAccountName string = storage.outputs.name
 output storageBlobEndpoint string = storage.outputs.blobEndpoint
-
-output postgresServerName string = postgresql.outputs.name
-output postgresFqdn string = postgresql.outputs.fqdn
-output postgresDatabaseName string = postgresql.outputs.databaseName
-output postgresAppLogin string = postgresAppLogin
 
 output uamiName string = managedIdentity.outputs.name
 output uamiId string = managedIdentity.outputs.id
@@ -272,3 +193,5 @@ output containerAppUrl string = deployContainerApp ? containerApp!.outputs.url :
 
 output staticWebAppName string = staticWebApp.outputs.name
 output staticWebAppUrl string = staticWebApp.outputs.url
+
+output postgresSchema string = postgresSchema

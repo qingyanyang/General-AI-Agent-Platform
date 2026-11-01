@@ -7,13 +7,10 @@ param appName string
 @description('Resource ID of the Container Apps Environment.')
 param environmentId string
 
-@description('Full container image reference including registry and tag.')
+@description('Full public container image reference (e.g. ghcr.io/<user>/<image>:<tag>). No registry credentials — image must be public.')
 param containerImage string
 
-@description('ACR login server, e.g. myacr.azurecr.io.')
-param registryLoginServer string
-
-@description('User-assigned managed identity resource ID (ACR pull + Azure resource access).')
+@description('User-assigned managed identity resource ID (Azure Blob access via DefaultAzureCredential).')
 param uamiResourceId string
 
 @description('User-assigned managed identity client ID (AZURE_CLIENT_ID for DefaultAzureCredential).')
@@ -28,24 +25,15 @@ param storageBlobEndpoint string
 @description('Environment name passed to the app as ENVIRONMENT (e.g. demo).')
 param environmentName string
 
-@description('PostgreSQL FQDN host.')
-param postgresHost string
+@secure()
+@description('Supabase PostgreSQL connection URL (prefer session pooler for IPv4). IaC-owned ACA secret.')
+param databaseUrl string
 
-@description('PostgreSQL port.')
-param postgresPort string = '5432'
-
-@description('PostgreSQL database name.')
-param postgresDb string
-
-@description('Least-privilege application DB login (not the server admin).')
-param postgresUser string
+@description('PostgreSQL schema used by the application (search_path / Alembic).')
+param postgresSchema string = 'public'
 
 @secure()
-@description('Least-privilege application DB password.')
-param postgresPassword string
-
-@secure()
-@description('External LLM API key. Declared in Bicep secrets (IaC-owned) so redeploys do not wipe it. Supply via --parameters / env.')
+@description('External LLM API key. Declared in Bicep secrets (IaC-owned) so redeploys do not wipe it.')
 param llmApiKey string
 
 @description('Container listen port.')
@@ -57,14 +45,14 @@ param minReplicas int = 0
 @description('Maximum replicas.')
 param maxReplicas int = 2
 
-@description('Liveness probe path (process-only; must not depend on DB).')
-param livenessPath string = '/health/live'
+@description('Liveness probe path (MVP: single /health endpoint).')
+param livenessPath string = '/health'
 
-@description('Readiness probe path (DB and critical dependencies).')
-param readinessPath string = '/health/ready'
+@description('Readiness probe path (MVP: same as liveness).')
+param readinessPath string = '/health'
 
-@description('Startup probe path (cold start; typically same as liveness).')
-param startupPath string = '/health/live'
+@description('Startup probe path (MVP: same as liveness).')
+param startupPath string = '/health'
 
 @description('Container CPU cores.')
 param containerCpu string = '0.25'
@@ -78,8 +66,8 @@ param corsAllowedOrigins string = 'http://localhost:5173'
 @description('Resource tags.')
 param tags object = {}
 
-// Single secret owner: Bicep declares ALL secrets used by the app (Option A).
-// Do not also manage llm-api-key via CLI-only unless you stop declaring it here.
+// Option A — single secret owner: Bicep declares ALL app secrets.
+// Public GHCR: no registries[] credentials (image must be pullable anonymously).
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
   location: location
@@ -106,16 +94,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      registries: [
-        {
-          server: registryLoginServer
-          identity: uamiResourceId
-        }
-      ]
       secrets: [
         {
-          name: 'postgres-password'
-          value: postgresPassword
+          name: 'database-url'
+          value: databaseUrl
         }
         {
           name: 'llm-api-key'
@@ -181,24 +163,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: uamiClientId
             }
             {
-              name: 'POSTGRES_HOST'
-              value: postgresHost
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
             }
             {
-              name: 'POSTGRES_PORT'
-              value: postgresPort
-            }
-            {
-              name: 'POSTGRES_DB'
-              value: postgresDb
-            }
-            {
-              name: 'POSTGRES_USER'
-              value: postgresUser
-            }
-            {
-              name: 'POSTGRES_PASSWORD'
-              secretRef: 'postgres-password'
+              name: 'POSTGRES_SCHEMA'
+              value: postgresSchema
             }
             {
               name: 'LLM_API_KEY'

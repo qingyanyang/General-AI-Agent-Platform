@@ -47,7 +47,7 @@ flowchart TD
     AGENTS --> RULES[Deterministic validation and calculations]
     AGENTS --> OUTPUT[Excel / PDF generation]
     API --> REPORT[Read-only Report Agent tools]
-    REPORT --> DB[(Azure Database for PostgreSQL)]
+    REPORT --> DB[(Supabase PostgreSQL)]
     RUNS --> DB
     PARSER --> BLOB[Azure Blob Storage]
     OUTPUT --> BLOB
@@ -63,12 +63,12 @@ flowchart TD
 | Backend | Python, FastAPI, Pydantic |
 | Agent workflows | LangGraph, LLM tool calling |
 | Data access | SQLAlchemy 2.x, Alembic |
-| Database | Azure Database for PostgreSQL |
+| Database | Supabase PostgreSQL (session pooler; schema `agent_platform`) |
 | File processing | openpyxl, pandas (where appropriate), ReportLab |
 | File storage | Azure Blob Storage |
 | Testing | pytest, Vitest |
 | Quality | Ruff, mypy, ESLint, TypeScript |
-| Infrastructure | Docker, Azure Container Apps, Azure Static Web Apps, Bicep |
+| Infrastructure | Docker, Azure Container Apps, Azure Static Web Apps, Bicep; images on public GHCR |
 | CI/CD | GitHub Actions |
 
 Specific providers and libraries may evolve as implementation and evaluation progress.
@@ -160,10 +160,10 @@ Infrastructure as Code: [`infra/`](infra/). Full ops guide: **[`infra/README.md`
 | --- | --- |
 | `.github/workflows/infra-ci.yml` | Bicep build/lint on `infra/**` (PR / push) |
 | `.github/workflows/infra-cd.yml` | Manual infra deploy to Environment `demo` |
-| `.github/workflows/backend-cd.yml` | ACR build + Container App update (skips until `backend/Dockerfile`) |
+| `.github/workflows/backend-cd.yml` | GHCR build/push + Container App update (skips until `backend/Dockerfile`) |
 | `.github/workflows/frontend-cd.yml` | SWA deploy (skips until `frontend/package.json`) |
 
-- **Hosting (planned live):** Static Web Apps (`eastasia`), Container Apps + PostgreSQL + Blob (`australiasoutheast`).
+- **Hosting (planned live):** Static Web Apps (`eastasia`), Container Apps + Blob (`australiasoutheast`); DB on Supabase; images on public GHCR.
 - **Observability:** Application Insights + Log Analytics; Python apps still need OpenTelemetry instrumentation.
 
 **Live demo:** Coming soon. Public demo will use synthetic data, rate limits, and LLM usage caps (see `infra/README.md`). Do not create Azure resources until an explicit deploy is approved.

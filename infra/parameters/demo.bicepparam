@@ -12,35 +12,20 @@ param tags = {
 }
 
 // Dual-path secrets (empty defaults are for CI file-eval only — do not deploy with empties).
-// Local: export vars, then run infra/scripts/validate-deploy-secrets.sh before az deploy.
-// CI:    infra-cd.yml validates, then --parameters overrides (see infra-cd.yml).
-// Gates: always require POSTGRES_ADMIN_PASSWORD; when deployContainerApp=true also require
-//        POSTGRES_APP_PASSWORD + LLM_API_KEY (and a non-empty containerImage).
-param postgresAdminLogin = 'pgadmin'
-param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD', '')
-
-param postgresAppLogin = 'eap_app'
-param postgresAppPassword = readEnvironmentVariable('POSTGRES_APP_PASSWORD', '')
-
+// Local: export DATABASE_URL / LLM_API_KEY, then run infra/scripts/validate-deploy-secrets.sh.
+// CI:    infra-cd.yml validates, then --parameters overrides.
+// Gates: Phase 1 needs no secrets. When deployContainerApp=true require DATABASE_URL + LLM_API_KEY
+//        and a non-empty public GHCR containerImage.
+//
+// DATABASE_URL: use Supabase *session pooler* connection string (IPv4-friendly), e.g.
+//   postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+// Prefer building/encoding the URL in your secret store; never commit it.
+param databaseUrl = readEnvironmentVariable('DATABASE_URL', '')
 param llmApiKey = readEnvironmentVariable('LLM_API_KEY', '')
+param postgresSchema = 'agent_platform'
 
-param postgresVersion = '16'
-param postgresSkuName = 'Standard_B1ms'
-param postgresSkuTier = 'Burstable'
-param postgresStorageSizeGb = 32
-param postgresBackupRetentionDays = 7
-param postgresDatabaseName = 'agent_platform_db'
-
-// WARNING (public demo only): 0.0.0.0–0.0.0.0 Allow Azure services — broader than the name implies.
-// Any Azure IP may attempt auth; mitigate with TLS + strong passwords + app_user least privilege.
-// Future staging/production .bicepparam files MUST set allowAzureServicesAccess = false
-// and use VNet-integrated CAE + private Postgres, or a static-egress IP allowlist.
-param allowAzureServicesAccess = true
-
-param postgresFirewallRules = []
-
-// Phase 1: false — UAMI + AcrPull still created; no Container App until image exists.
-// Phase 2: after first FastAPI image is in ACR AND app_user is created, set true + containerImage.
+// Phase 1: false — no Container App until a public GHCR image exists.
+// Phase 2: set true + containerImage = 'ghcr.io/<github-username>/agent-platform-api:<tag>'
 param deployContainerApp = false
 param containerImage = ''
 
@@ -54,4 +39,3 @@ param corsAllowedOrigins = [
 ]
 
 param staticWebAppSkuName = 'Free'
-param acrSkuName = 'Basic'

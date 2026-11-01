@@ -4,9 +4,8 @@
 # Usage (local):
 #   ./infra/scripts/validate-deploy-secrets.sh infra/parameters/demo.bicepparam
 #
-# Usage (CI): source secrets into the environment first, then run the same.
-# Empty defaults in .bicepparam are for CI parse/what-if evaluation only —
-# this script is the gate that prevents an accidental empty-secret deploy.
+# Phase 1 (deployContainerApp=false): no secrets required.
+# Phase 2: require DATABASE_URL + LLM_API_KEY and a non-empty containerImage.
 
 set -euo pipefail
 
@@ -28,15 +27,13 @@ require_nonempty() {
   fi
 }
 
-require_nonempty POSTGRES_ADMIN_PASSWORD
-
 deploy_ca=false
 if grep -Eq '^[[:space:]]*param[[:space:]]+deployContainerApp[[:space:]]*=[[:space:]]*true[[:space:]]*$' "${PARAM_FILE}"; then
   deploy_ca=true
 fi
 
 if [[ "${deploy_ca}" == "true" ]]; then
-  require_nonempty POSTGRES_APP_PASSWORD
+  require_nonempty DATABASE_URL
   require_nonempty LLM_API_KEY
   if ! grep -Eq '^[[:space:]]*param[[:space:]]+containerImage[[:space:]]*=[[:space:]]*'\''[^'\'']+'\''' "${PARAM_FILE}"; then
     echo "deployContainerApp is true but containerImage looks empty in ${PARAM_FILE}" >&2
