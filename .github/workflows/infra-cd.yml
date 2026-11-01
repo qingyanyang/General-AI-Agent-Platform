@@ -75,51 +75,24 @@ jobs:
 
           bash infra/scripts/validate-deploy-secrets.sh "$PARAMETER_FILE"
 
-      - name: Prepare secure deployment parameters
+      - name: Validate Bicep deployment
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           set -euo pipefail
 
-          PARAMS_FILE="$(mktemp)"
-          chmod 600 "$PARAMS_FILE"
-
-          python3 - "$PARAMS_FILE" <<'PY'
-          import json
-          import os
-          import sys
-
-          parameters = {
-              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
-              "contentVersion": "1.0.0.0",
-              "parameters": {
-                  "databaseUrl": {
-                      "value": os.environ.get("DATABASE_URL", "")
-                  },
-                  "llmApiKey": {
-                      "value": os.environ.get("LLM_API_KEY", "")
-                  }
-              }
-          }
-
-          with open(sys.argv[1], "w") as f:
-              json.dump(parameters, f)
-          PY
-
-          echo "DEPLOY_PARAMS_FILE=$PARAMS_FILE" >> "$GITHUB_ENV"
-
-      - name: Validate Bicep deployment
-        run: |
-          set -euo pipefail
-
           az deployment group validate \
             --resource-group "$RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
             --parameters "$PARAMETER_FILE" \
-            --parameters @"$DEPLOY_PARAMS_FILE"
+            --parameters \
+              databaseUrl="$DATABASE_URL" \
+              llmApiKey="$LLM_API_KEY"
 
       - name: Deploy resource group infrastructure
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -130,9 +103,10 @@ jobs:
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --name "$DEPLOYMENT_NAME" \
-            --template-file infra/main.bicep \
             --parameters "$PARAMETER_FILE" \
-            --parameters @"$DEPLOY_PARAMS_FILE"
+            --parameters \
+              databaseUrl="$DATABASE_URL" \
+              llmApiKey="$LLM_API_KEY"
 
       - name: Print non-sensitive outputs
         run: |
@@ -143,10 +117,3 @@ jobs:
             --name "$DEPLOYMENT_NAME" \
             --query properties.outputs \
             -o json
-
-      - name: Remove temporary parameter file
-        if: always()
-        run: |
-          if [ -n "${DEPLOY_PARAMS_FILE:-}" ]; then
-            rm -f "$DEPLOY_PARAMS_FILE"
-          fi
