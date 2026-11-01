@@ -34,7 +34,6 @@ fi
 
 if [[ "${deploy_ca}" == "true" ]]; then
   require_nonempty DATABASE_URL
-  require_nonempty LLM_API_KEY
   if ! grep -Eq '^[[:space:]]*param[[:space:]]+containerImage[[:space:]]*=[[:space:]]*'\''[^'\'']+'\''' "${PARAM_FILE}"; then
     echo "deployContainerApp is true but containerImage looks empty in ${PARAM_FILE}" >&2
     missing=1
