@@ -20,8 +20,11 @@ param tags object = {}
 param databaseUrl string = ''
 
 @secure()
-@description('External LLM API key (optional). When non-empty, IaC-owned ACA secret llm-api-key. CI: --parameters llmApiKey=...')
+@description('External LLM API key (optional). Used only when enableLlmApiKey is true. CI: --parameters llmApiKey=... enableLlmApiKey=true')
 param llmApiKey string = ''
+
+@description('When true, wire ACA secret llm-api-key. Set from deploy scripts when LLM_API_KEY is present — do not derive via empty(secure).')
+param enableLlmApiKey bool = false
 
 @description('PostgreSQL schema used by FastAPI / Alembic (Supabase).')
 param postgresSchema string = 'public'
@@ -148,6 +151,7 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     databaseUrl: databaseUrl
     postgresSchema: postgresSchema
     llmApiKey: llmApiKey
+    enableLlmApiKey: enableLlmApiKey
     containerCpu: containerCpu
     containerMemory: containerMemory
     minReplicas: minReplicas
