@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     postgres_schema: str = "agent_platform"
     cors_allowed_origins: str = "http://localhost:5173"
     llm_api_key: str | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_base_url: str | None = None
+    agent_recursion_limit: int = 10
     log_level: str = "INFO"
 
     @property
