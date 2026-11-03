@@ -1,0 +1,15 @@
+from fastapi import APIRouter
+
+from app.core.config import get_settings
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+def health() -> dict[str, str]:
+    settings = get_settings()
+    return {
+        "status": "healthy",
+        "service": "agent-platform-api",
+        "environment": settings.environment,
+    }

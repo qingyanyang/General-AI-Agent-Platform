@@ -142,7 +142,19 @@ npm install
 npm run dev
 ```
 
-See [`frontend/README.md`](frontend/README.md). Set `VITE_API_BASE_URL` to the API origin. Backend / Docker Compose setup will be documented when that scaffold lands.
+See [`frontend/README.md`](frontend/README.md). Set `VITE_API_BASE_URL` to the API origin.
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8000
+```
+
+See [`backend/README.md`](backend/README.md).
 
 ## CI/CD and deployment
 
