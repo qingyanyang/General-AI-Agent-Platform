@@ -1,12 +1,12 @@
 import logging
 import sys
 
-from app.core.config import settings
+from app.core.config import get_settings
 
 
 def configure_logging() -> None:
     """Configure application-wide logging once at startup."""
-    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    level = getattr(logging, get_settings().log_level.upper(), logging.INFO)
 
     root = logging.getLogger()
     if root.handlers:

@@ -28,6 +28,8 @@ Health: `GET http://localhost:8000/health`
 
 `DATABASE_URL` is optional for `/health`. Importing `app.core.database` helpers requires it.
 
+`POSTGRES_SCHEMA` is accepted via env / Settings for Container App parity, but is **not** applied to the SQLAlchemy engine yet (no `search_path` / connect options). Treat it as reserved until Alembic and models are added.
+
 ## Quality
 
 ```bash
