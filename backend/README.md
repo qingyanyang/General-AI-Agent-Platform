@@ -44,10 +44,14 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `LLM_API_KEY` | unset | Required for live `POST /agents/run` |
-| `LLM_MODEL` | `gpt-4o-mini` | OpenAI-compatible model id |
-| `LLM_BASE_URL` | unset | Optional OpenAI-compatible base URL |
+| `LLM_PROVIDER` | `openai` | `openai` or `deepseek` (OpenAI-compatible API) |
+| `LLM_API_KEY` | unset | Primary key for live `POST /agents/run` |
+| `DEEPSEEK_API_KEY` | unset | Optional DeepSeek key if `LLM_API_KEY` is unset |
+| `LLM_MODEL` | `gpt-4o-mini` | Model id; DeepSeek default becomes `deepseek-flash` when still on the OpenAI default |
+| `LLM_BASE_URL` | unset | OpenAI-compatible base URL; DeepSeek defaults to `https://api.deepseek.com` |
 | `AGENT_RECURSION_LIMIT` | `10` | LangGraph recursion limit (tool-loop guard) |
+
+DeepSeek uses the same `ChatOpenAI` client ([docs](https://api-docs.deepseek.com/)): base URL `https://api.deepseek.com`, models `deepseek-flash` / `deepseek-v4-pro`, with OpenAI-style tool calling. Do not commit real keys — use local `.env` only.
 
 ## Quality
 

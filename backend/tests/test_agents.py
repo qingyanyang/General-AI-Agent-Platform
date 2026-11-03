@@ -74,19 +74,31 @@ def test_agent_recursion_limit_raises(monkeypatch: MonkeyPatch) -> None:
     get_settings.cache_clear()
 
 
-def test_agent_llm_failure_mapped() -> None:
+def test_agent_llm_failure_mapped_to_generic_message() -> None:
     class ExplodingModel(ScriptedChatModel):
         def _next_message(self) -> AIMessage:
-            raise RuntimeError("boom")
+            raise RuntimeError("secret upstream detail")
 
-    with pytest.raises(AgentExecutionError, match="boom"):
+    with pytest.raises(AgentExecutionError, match="^Agent execution failed$") as exc_info:
         asyncio.run(run_agent("hi", llm=ExplodingModel(script=[])))
+
+    assert "secret" not in str(exc_info.value)
+
+
+def test_agent_value_error_is_execution_failure_not_misconfigured() -> None:
+    class ValueErrorModel(ScriptedChatModel):
+        def _next_message(self) -> AIMessage:
+            raise ValueError("invalid model response shape")
+
+    with pytest.raises(AgentExecutionError, match="^Agent execution failed$"):
+        asyncio.run(run_agent("hi", llm=ValueErrorModel(script=[])))
 
 
 def test_agent_requires_api_key_when_no_llm_injected(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     get_settings.cache_clear()
 
     with pytest.raises(AgentNotConfiguredError):
@@ -121,12 +133,13 @@ def test_agents_run_api_missing_key_returns_503(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     get_settings.cache_clear()
 
     response = client.post("/agents/run", json={"message": "hello"})
 
     assert response.status_code == 503
-    assert "LLM_API_KEY" in response.json()["detail"]
+    assert "API key" in response.json()["detail"]
     get_settings.cache_clear()
 
 

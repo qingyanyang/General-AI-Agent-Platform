@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,6 +12,8 @@ from langgraph.errors import GraphRecursionError
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.graph import build_agent_graph
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,9 +79,9 @@ async def run_agent(
 ) -> AgentResult:
     """Run the agent graph once for a user message."""
     settings = get_settings()
-    if llm is None and not settings.llm_api_key:
+    if llm is None and not settings.resolve_llm_api_key():
         raise AgentNotConfiguredError(
-            "LLM_API_KEY is not configured; cannot run the agent",
+            "LLM API key is not configured; cannot run the agent",
         )
 
     try:
@@ -93,11 +96,10 @@ async def run_agent(
         raise AgentExecutionError(
             "Agent stopped: recursion limit exceeded (possible tool-calling loop)",
         ) from exc
-    except ValueError as exc:
-        # create_chat_model raises ValueError when key missing
-        raise AgentNotConfiguredError(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
-        raise AgentExecutionError(f"Agent execution failed: {exc}") from exc
+        logger.exception("Agent execution failed")
+        raise AgentExecutionError("Agent execution failed") from exc
 
     messages = list(result.get("messages", []))
     return AgentResult(reply=_extract_reply(messages), messages=_normalize_messages(messages))
+
