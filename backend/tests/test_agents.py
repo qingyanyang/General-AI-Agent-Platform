@@ -7,12 +7,21 @@ import asyncio
 import pytest
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import AgentMessageView, AgentResult, run_agent
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
 
 from tests.fakes import ScriptedChatModel
+
+
+def _settings_without_llm_keys() -> Settings:
+    return Settings(
+        _env_file=None,
+        llm_provider="openai",
+        llm_api_key=None,
+        deepseek_api_key=None,
+    )
 
 
 def _tool_call_message(*, a: float = 2, b: float = 3) -> AIMessage:
@@ -97,14 +106,10 @@ def test_agent_value_error_is_execution_failure_not_misconfigured() -> None:
 def test_agent_requires_api_key_when_no_llm_injected(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    get_settings.cache_clear()
+    monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_llm_keys)
 
     with pytest.raises(AgentNotConfiguredError):
         asyncio.run(run_agent("hi"))
-
-    get_settings.cache_clear()
 
 
 def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) -> None:
@@ -132,15 +137,12 @@ def test_agents_run_api_missing_key_returns_503(
     client: TestClient,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    get_settings.cache_clear()
+    monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_llm_keys)
 
     response = client.post("/agents/run", json={"message": "hello"})
 
     assert response.status_code == 503
     assert "API key" in response.json()["detail"]
-    get_settings.cache_clear()
 
 
 def test_agents_run_api_execution_error_returns_502(
