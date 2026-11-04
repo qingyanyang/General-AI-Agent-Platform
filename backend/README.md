@@ -1,13 +1,13 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#8).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#9).
 
 ## Layout
 
 ```text
 app/
   api/           # HTTP routers (health, agents)
-  agents/        # LangGraph runtime (state, tools, graph, invoke)
+  agents/        # LangGraph runtime (state, tools registry, graph, invoke)
   core/          # Config, logging, errors, optional DB helpers
   services/      # Domain services (future)
 tests/
@@ -52,6 +52,10 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 | `AGENT_RECURSION_LIMIT` | `10` | LangGraph recursion limit (tool-loop guard) |
 
 DeepSeek uses the same `ChatOpenAI` client ([docs](https://api-docs.deepseek.com/)): base URL `https://api.deepseek.com`, models `deepseek-flash` / `deepseek-v4-pro`, with OpenAI-style tool calling. Do not commit real keys — use local `.env` only.
+
+### Tool registry
+
+Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`. The LangGraph tools node executes **only** registered tools; unknown names and validation/runtime failures return `ToolMessage` errors so the agent loop can continue safely.
 
 ## Quality
 

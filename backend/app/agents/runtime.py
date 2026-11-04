@@ -102,4 +102,3 @@ async def run_agent(
 
     messages = list(result.get("messages", []))
     return AgentResult(reply=_extract_reply(messages), messages=_normalize_messages(messages))
-
