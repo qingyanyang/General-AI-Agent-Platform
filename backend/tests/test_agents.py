@@ -77,8 +77,10 @@ def test_agent_recursion_limit_raises(monkeypatch: MonkeyPatch) -> None:
         ]
     )
 
-    with pytest.raises(AgentExecutionError, match="recursion limit"):
+    with pytest.raises(AgentExecutionError, match="recursion limit") as exc_info:
         asyncio.run(run_agent("loop", llm=llm))
+
+    assert exc_info.value.execution_id
 
     get_settings.cache_clear()
 
@@ -92,6 +94,7 @@ def test_agent_llm_failure_mapped_to_generic_message() -> None:
         asyncio.run(run_agent("hi", llm=ExplodingModel(script=[])))
 
     assert "secret" not in str(exc_info.value)
+    assert exc_info.value.execution_id
 
 
 def test_agent_value_error_is_execution_failure_not_misconfigured() -> None:
@@ -160,3 +163,24 @@ def test_agents_run_api_execution_error_returns_502(
 
     assert response.status_code == 502
     assert response.json()["detail"] == "upstream failed"
+
+
+def test_agents_run_api_execution_error_includes_execution_id(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def fake_run(message: str, *, llm=None) -> AgentResult:
+        raise AgentExecutionError(
+            "upstream failed",
+            execution_id="11111111-1111-4111-8111-111111111111",
+        )
+
+    monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
+
+    response = client.post("/agents/run", json={"message": "hello"})
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "message": "upstream failed",
+        "execution_id": "11111111-1111-4111-8111-111111111111",
+    }

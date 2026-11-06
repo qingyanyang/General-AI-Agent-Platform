@@ -88,6 +88,7 @@ async def run_agent(
         )
 
     execution_id = uuid.uuid4()
+    execution_id_text = str(execution_id)
     try:
         graph = build_agent_graph(llm=llm)
         with langsmith_tracing(settings):
@@ -100,14 +101,18 @@ async def run_agent(
     except GraphRecursionError as exc:
         raise AgentExecutionError(
             "Agent stopped: recursion limit exceeded (possible tool-calling loop)",
+            execution_id=execution_id_text,
         ) from exc
     except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
         logger.exception("Agent execution failed")
-        raise AgentExecutionError("Agent execution failed") from exc
+        raise AgentExecutionError(
+            "Agent execution failed",
+            execution_id=execution_id_text,
+        ) from exc
 
     messages = list(result.get("messages", []))
     return AgentResult(
         reply=_extract_reply(messages),
         messages=_normalize_messages(messages),
-        execution_id=str(execution_id),
+        execution_id=execution_id_text,
     )

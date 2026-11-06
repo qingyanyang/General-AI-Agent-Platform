@@ -7,6 +7,8 @@ import logging
 import os
 from typing import Any
 
+import pytest
+from app.agents.errors import AgentExecutionError
 from app.agents.runtime import run_agent
 from app.agents.tracing import tracing_project_name
 from app.core.config import Settings
@@ -137,6 +139,29 @@ def test_agent_runs_when_tracing_requested_without_api_key(
     assert result.reply == "still works"
     assert seen["tracing"] == "false"
     assert "LANGSMITH_API_KEY" in caplog.text
+
+
+def test_failed_invoke_returns_the_same_execution_id(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Graph:
+        async def ainvoke(
+            self,
+            state: dict[str, Any],
+            config: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            assert config is not None
+            captured["run_id"] = config["run_id"]
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.agents.runtime.get_settings", lambda: _settings())
+    monkeypatch.setattr("app.agents.runtime.build_agent_graph", lambda **kwargs: _Graph())
+
+    with pytest.raises(AgentExecutionError, match="^Agent execution failed$") as exc_info:
+        asyncio.run(run_agent("Hi", llm=ScriptedChatModel(script=[])))
+
+    assert exc_info.value.execution_id == str(captured["run_id"])
+    assert "boom" not in str(exc_info.value)
 
 
 def test_agent_runs_when_langsmith_client_raises(monkeypatch: MonkeyPatch) -> None:

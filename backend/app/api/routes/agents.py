@@ -34,9 +34,12 @@ async def agents_run(body: AgentRunRequest) -> AgentRunResponse:
             detail=str(exc),
         ) from exc
     except AgentExecutionError as exc:
+        detail: str | dict[str, str] = str(exc)
+        if exc.execution_id is not None:
+            detail = {"message": str(exc), "execution_id": exc.execution_id}
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
+            detail=detail,
         ) from exc
 
     return AgentRunResponse(
