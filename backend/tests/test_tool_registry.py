@@ -17,6 +17,7 @@ from app.agents.tools import (
     multiply,
 )
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
 from tests.fakes import ScriptedChatModel
 
@@ -127,8 +128,6 @@ def test_unregistered_tool_call_returns_error_tool_message() -> None:
 
 
 def test_tool_execution_failure_does_not_crash_graph() -> None:
-    from langchain_core.tools import tool
-
     @tool
     def boom() -> str:
         """Always fails."""
@@ -155,6 +154,6 @@ def test_tool_execution_failure_does_not_crash_graph() -> None:
     graph = build_agent_graph(llm=llm, registry=registry)
     result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="go")]}))
     tool_msg = next(msg for msg in result["messages"] if msg.type == "tool")
-    assert "Tool execution error" in tool_msg.content
-    assert "kaboom" in tool_msg.content
+    assert tool_msg.content == "Tool execution error for 'boom'"
+    assert "kaboom" not in tool_msg.content
     assert result["messages"][-1].content == "Recovered after tool failure."

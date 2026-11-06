@@ -75,12 +75,3 @@ class ToolRegistry:
             return await tool.ainvoke(args)
         except ValidationError as exc:
             raise ToolValidationError(str(exc)) from exc
-        except Exception as exc:
-            # LangChain often wraps pydantic errors; re-check message/type.
-            if isinstance(exc, ValidationError) or exc.__class__.__name__ == "ValidationError":
-                raise ToolValidationError(str(exc)) from exc
-            # Some tool paths raise ValueError for bad args
-            if "validation" in str(exc).lower() or "args" in str(exc).lower():
-                # Prefer not to misclassify runtime bugs; only wrap explicit ValidationError above.
-                pass
-            raise

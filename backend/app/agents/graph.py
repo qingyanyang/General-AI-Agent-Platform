@@ -138,11 +138,11 @@ async def _execute_registered_tools(
                     name=name,
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — keep agent loop alive on tool failure
+        except Exception:  # noqa: BLE001 — keep agent loop alive on tool failure
             logger.exception("Tool execution failed for %s", name)
             outputs.append(
                 ToolMessage(
-                    content=f"Tool execution error for '{name}': {exc}",
+                    content=f"Tool execution error for '{name}'",
                     tool_call_id=call_id,
                     name=name,
                 )
