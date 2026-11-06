@@ -20,6 +20,7 @@ class AgentMessageOut(BaseModel):
 
 class AgentRunResponse(BaseModel):
     reply: str
+    execution_id: str
     messages: list[AgentMessageOut]
 
 
@@ -40,6 +41,7 @@ async def agents_run(body: AgentRunRequest) -> AgentRunResponse:
 
     return AgentRunResponse(
         reply=result.reply,
+        execution_id=result.execution_id,
         messages=[
             AgentMessageOut(role=item.role, content=item.content) for item in result.messages
         ],

@@ -116,6 +116,7 @@ def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) ->
     async def fake_run(message: str, *, llm=None) -> AgentResult:
         return AgentResult(
             reply="ok",
+            execution_id="11111111-1111-4111-8111-111111111111",
             messages=[
                 AgentMessageView(role="user", content=message),
                 AgentMessageView(role="assistant", content="ok"),
@@ -129,6 +130,7 @@ def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) ->
     assert response.status_code == 200
     body = response.json()
     assert body["reply"] == "ok"
+    assert body["execution_id"] == "11111111-1111-4111-8111-111111111111"
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][-1]["content"] == "ok"
 

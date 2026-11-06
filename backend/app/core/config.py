@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str | None = None
     agent_recursion_limit: int = 10
+    # Stable id included in LangSmith metadata. One graph exists today.
+    agent_id: str = "default"
+    # LangSmith tracing is off unless LANGSMITH_TRACING=true and LANGSMITH_API_KEY is set.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+    langsmith_project: str | None = None
+    langsmith_endpoint: str | None = None
     log_level: str = "INFO"
 
     @property

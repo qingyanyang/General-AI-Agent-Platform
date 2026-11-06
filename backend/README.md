@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#9).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#10).
 
 ## Layout
 
@@ -50,6 +50,15 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 | `LLM_MODEL` | `gpt-4o-mini` | Model id; DeepSeek default becomes `deepseek-flash` when still on the OpenAI default |
 | `LLM_BASE_URL` | unset | OpenAI-compatible base URL; DeepSeek defaults to `https://api.deepseek.com` |
 | `AGENT_RECURSION_LIMIT` | `10` | LangGraph recursion limit (tool-loop guard) |
+| `AGENT_ID` | `default` | Id stored on each trace (`metadata.agent_id`) |
+| `LANGSMITH_TRACING` | `false` | Turn on LangSmith tracing for agent runs |
+| `LANGSMITH_API_KEY` | unset | Required when tracing is on; tracing stays off if it is missing |
+| `LANGSMITH_PROJECT` | `agent-platform-{ENVIRONMENT}` | Separate projects per environment unless overridden |
+| `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL |
+
+`POST /agents/run` returns `execution_id`. That id is the LangSmith root run id, so a trace can be matched to the API response. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`. API keys and the database URL are not copied into metadata. The user message and tool inputs are sent to LangSmith only while tracing is enabled.
+
+If LangSmith is disabled, the key is missing, or the LangSmith client raises, the agent run still completes. Each run sets `LANGSMITH_TRACING` / `LANGSMITH_TRACING_V2` from these settings and restores the previous process environment afterward.
 
 DeepSeek uses the same `ChatOpenAI` client ([docs](https://api-docs.deepseek.com/)): base URL `https://api.deepseek.com`, models `deepseek-flash` / `deepseek-v4-pro`, with OpenAI-style tool calling. Do not commit real keys — use local `.env` only.
 

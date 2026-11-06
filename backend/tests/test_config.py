@@ -18,6 +18,34 @@ def test_settings_load_cors_origins(monkeypatch: MonkeyPatch) -> None:
     ]
 
 
+def test_langsmith_settings_default_off() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.langsmith_tracing is False
+    assert settings.langsmith_api_key is None
+    assert settings.langsmith_project is None
+    assert settings.langsmith_endpoint is None
+    assert settings.agent_id == "default"
+
+
+def test_langsmith_settings_load_from_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "prod-project")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://eu.api.smith.langchain.com")
+    monkeypatch.setenv("AGENT_ID", "takeoff")
+    get_settings.cache_clear()
+
+    settings = Settings(_env_file=None)
+
+    assert settings.langsmith_tracing is True
+    assert settings.langsmith_api_key == "ls-key"
+    assert settings.langsmith_project == "prod-project"
+    assert settings.langsmith_endpoint == "https://eu.api.smith.langchain.com"
+    assert settings.agent_id == "takeoff"
+    get_settings.cache_clear()
+
+
 def test_settings_load_environment(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT", "demo")
     get_settings.cache_clear()
