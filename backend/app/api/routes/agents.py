@@ -20,6 +20,7 @@ class AgentMessageOut(BaseModel):
 
 class AgentRunResponse(BaseModel):
     reply: str
+    execution_id: str
     messages: list[AgentMessageOut]
 
 
@@ -33,13 +34,17 @@ async def agents_run(body: AgentRunRequest) -> AgentRunResponse:
             detail=str(exc),
         ) from exc
     except AgentExecutionError as exc:
+        detail: str | dict[str, str] = str(exc)
+        if exc.execution_id is not None:
+            detail = {"message": str(exc), "execution_id": exc.execution_id}
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
+            detail=detail,
         ) from exc
 
     return AgentRunResponse(
         reply=result.reply,
+        execution_id=result.execution_id,
         messages=[
             AgentMessageOut(role=item.role, content=item.content) for item in result.messages
         ],

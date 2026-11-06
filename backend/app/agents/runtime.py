@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,6 +12,7 @@ from langgraph.errors import GraphRecursionError
 
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.graph import build_agent_graph
+from app.agents.tracing import build_run_config, langsmith_tracing
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ class AgentMessageView:
 class AgentResult:
     reply: str
     messages: list[AgentMessageView]
+    execution_id: str
 
 
 def _message_role(message: BaseMessage) -> str:
@@ -84,21 +87,32 @@ async def run_agent(
             "LLM API key is not configured; cannot run the agent",
         )
 
+    execution_id = uuid.uuid4()
+    execution_id_text = str(execution_id)
     try:
         graph = build_agent_graph(llm=llm)
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage(content=message)]},
-            config={"recursion_limit": settings.agent_recursion_limit},
-        )
+        with langsmith_tracing(settings):
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content=message)]},
+                config=build_run_config(settings, execution_id),
+            )
     except AgentNotConfiguredError:
         raise
     except GraphRecursionError as exc:
         raise AgentExecutionError(
             "Agent stopped: recursion limit exceeded (possible tool-calling loop)",
+            execution_id=execution_id_text,
         ) from exc
     except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
         logger.exception("Agent execution failed")
-        raise AgentExecutionError("Agent execution failed") from exc
+        raise AgentExecutionError(
+            "Agent execution failed",
+            execution_id=execution_id_text,
+        ) from exc
 
     messages = list(result.get("messages", []))
-    return AgentResult(reply=_extract_reply(messages), messages=_normalize_messages(messages))
+    return AgentResult(
+        reply=_extract_reply(messages),
+        messages=_normalize_messages(messages),
+        execution_id=execution_id_text,
+    )

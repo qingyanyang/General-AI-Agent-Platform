@@ -11,3 +11,7 @@ class AgentNotConfiguredError(AgentError):
 
 class AgentExecutionError(AgentError):
     """Raised when graph or LLM execution fails."""
+
+    def __init__(self, message: str, *, execution_id: str | None = None) -> None:
+        super().__init__(message)
+        self.execution_id = execution_id
