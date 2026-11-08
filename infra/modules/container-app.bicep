@@ -39,6 +39,19 @@ param llmApiKey string = ''
 @description('When true, declare ACA secret llm-api-key and env LLM_API_KEY. Do not use empty() on @secure() params — ARM cannot reliably test them.')
 param enableLlmApiKey bool = false
 
+@secure()
+@description('LangSmith API key. Only used when enableLangsmithTracing is true.')
+param langsmithApiKey string = ''
+
+@description('When true, declare ACA secret langsmith-api-key and set LANGSMITH_TRACING=true. Do not use empty() on @secure() params.')
+param enableLangsmithTracing bool = false
+
+@description('Optional LangSmith project override. Empty → app default agent-platform-{ENVIRONMENT}.')
+param langsmithProject string = ''
+
+@description('Optional LangSmith API base URL (e.g. regional endpoint). Empty → SDK default.')
+param langsmithEndpoint string = ''
+
 @description('Container listen port.')
 param containerPort int = 8000
 
@@ -81,6 +94,13 @@ var llmSecret = enableLlmApiKey ? [
   {
     name: 'llm-api-key'
     value: llmApiKey
+  }
+] : []
+
+var langsmithSecret = enableLangsmithTracing ? [
+  {
+    name: 'langsmith-api-key'
+    value: langsmithApiKey
   }
 ] : []
 
@@ -130,6 +150,31 @@ var llmEnv = enableLlmApiKey ? [
   }
 ] : []
 
+var langsmithEnv = enableLangsmithTracing ? concat(
+  [
+    {
+      name: 'LANGSMITH_TRACING'
+      value: 'true'
+    }
+    {
+      name: 'LANGSMITH_API_KEY'
+      secretRef: 'langsmith-api-key'
+    }
+  ],
+  empty(langsmithProject) ? [] : [
+    {
+      name: 'LANGSMITH_PROJECT'
+      value: langsmithProject
+    }
+  ],
+  empty(langsmithEndpoint) ? [] : [
+    {
+      name: 'LANGSMITH_ENDPOINT'
+      value: langsmithEndpoint
+    }
+  ]
+) : []
+
 // Option A — single secret owner: Bicep declares ALL app secrets that are in use.
 // Public GHCR: no registries[] credentials (image must be pullable anonymously).
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
@@ -158,7 +203,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      secrets: concat(databaseSecret, llmSecret)
+      secrets: concat(databaseSecret, llmSecret, langsmithSecret)
     }
     template: {
       containers: [
@@ -204,7 +249,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               timeoutSeconds: 5
             }
           ]
-          env: concat(baseEnv, llmEnv)
+          env: concat(baseEnv, llmEnv, langsmithEnv)
         }
       ]
       scale: {

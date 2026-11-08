@@ -70,6 +70,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -79,6 +80,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -86,6 +88,10 @@ jobs:
           if [[ -n "${LLM_API_KEY:-}" ]]; then
             EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
             EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
+          fi
+          if [[ -n "${LANGSMITH_API_KEY:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "langsmithApiKey=${LANGSMITH_API_KEY}")
+            EXTRA_PARAMS+=(--parameters "enableLangsmithTracing=true")
           fi
 
           az deployment group validate \
@@ -99,6 +105,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -110,6 +117,10 @@ jobs:
           if [[ -n "${LLM_API_KEY:-}" ]]; then
             EXTRA_PARAMS+=(--parameters "llmApiKey=${LLM_API_KEY}")
             EXTRA_PARAMS+=(--parameters "enableLlmApiKey=true")
+          fi
+          if [[ -n "${LANGSMITH_API_KEY:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "langsmithApiKey=${LANGSMITH_API_KEY}")
+            EXTRA_PARAMS+=(--parameters "enableLangsmithTracing=true")
           fi
 
           az deployment group create \

@@ -6,7 +6,7 @@
 #
 # Phase 2 (deployContainerApp=true):
 #   DATABASE_URL and containerImage are required.
-#   LLM_API_KEY is optional.
+#   LLM_API_KEY and LANGSMITH_API_KEY are optional.
 
 set -euo pipefail
 
@@ -54,8 +54,7 @@ if [[ "$deploy_ca" == "true" ]]; then
     missing=1
   fi
 
-  # Optional: LLM_API_KEY
-  # No validation required until LLM integration is implemented.
+  # Optional: LLM_API_KEY, LANGSMITH_API_KEY (scripts set enable* when present).
 
 else
   echo "Container App deployment disabled."
