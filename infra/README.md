@@ -98,8 +98,8 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 | `AZURE_SUBSCRIPTION_ID` | Local `scripts/infra/deploy.sh` | Target subscription check |
 | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | GitHub OIDC | Azure login |
 | `DATABASE_URL` | When `deployContainerApp = true` | Supabase session-pooler URL → ACA secret `database-url` → env `DATABASE_URL` |
-| `LLM_API_KEY` | Optional | When set, scripts pass `enableLlmApiKey=true` + `llmApiKey` → ACA secret `llm-api-key` |
-| `LANGSMITH_API_KEY` | Optional | When set, scripts pass `enableLangsmithTracing=true` + `langsmithApiKey` → ACA secret `langsmith-api-key` + `LANGSMITH_TRACING=true`. Project defaults to `agent-platform-demo` |
+| `LLM_API_KEY` | Optional | When set, scripts pass `enableLlmApiKey=true` + `llmApiKey` → ACA secret `llm-api-key`. Demo expects a **DeepSeek** key (`llmProvider=deepseek` in `demo.bicepparam`) |
+| `LANGSMITH_API_KEY` | Optional | When set, scripts pass `enableLangsmithTracing=true` + `langsmithApiKey` → ACA secret + `LANGSMITH_TRACING=true`. Project defaults to `agent-platform-demo`. Demo sets APAC `langsmithEndpoint` in params |
 | `containerImage` (param) | When `deployContainerApp = true` | Public `ghcr.io/...` reference |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | frontend-cd | SWA deploy |
 | `CONTAINER_APP_NAME` (GitHub var) | backend-cd | Image update target |
@@ -117,7 +117,7 @@ Application schema: `POSTGRES_SCHEMA=agent_platform` (non-secret env on the Cont
 
 ### Option A secret ownership
 
-Bicep declares `database-url` always (Phase 2), and optional secrets only when their `enable*` flags are true (`llm-api-key`, `langsmith-api-key`). ARM cannot reliably `empty()` a `@secure()` value, so deploy scripts set those flags when the env vars are present. Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
+Bicep declares `database-url` always (Phase 2), and optional secrets only when their `enable*` flags are true (`llm-api-key`, `langsmith-api-key`). ARM cannot reliably `empty()` a `@secure()` value, so deploy scripts set those flags when the env vars are present. Non-secret LLM config (`LLM_PROVIDER`, optional `LLM_MODEL` / `LLM_BASE_URL`) always comes from Bicep params. Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
 
 ### Validate before deploy
 

@@ -39,6 +39,19 @@ param llmApiKey string = ''
 @description('When true, declare ACA secret llm-api-key and env LLM_API_KEY. Do not use empty() on @secure() params — ARM cannot reliably test them.')
 param enableLlmApiKey bool = false
 
+@description('LLM provider for FastAPI: openai or deepseek. Always set on the Container App (non-secret).')
+@allowed([
+  'openai'
+  'deepseek'
+])
+param llmProvider string = 'openai'
+
+@description('Optional LLM model id override. Empty → app default (gpt-4o-mini / deepseek-flash).')
+param llmModel string = ''
+
+@description('Optional OpenAI-compatible base URL. Empty → app default (DeepSeek uses https://api.deepseek.com).')
+param llmBaseUrl string = ''
+
 @secure()
 @description('LangSmith API key. Only used when enableLangsmithTracing is true.')
 param langsmithApiKey string = ''
@@ -143,12 +156,35 @@ var baseEnv = [
   }
 ]
 
-var llmEnv = enableLlmApiKey ? [
+var llmProviderEnv = [
+  {
+    name: 'LLM_PROVIDER'
+    value: llmProvider
+  }
+]
+
+var llmModelEnv = empty(llmModel) ? [] : [
+  {
+    name: 'LLM_MODEL'
+    value: llmModel
+  }
+]
+
+var llmBaseUrlEnv = empty(llmBaseUrl) ? [] : [
+  {
+    name: 'LLM_BASE_URL'
+    value: llmBaseUrl
+  }
+]
+
+var llmApiKeyEnv = enableLlmApiKey ? [
   {
     name: 'LLM_API_KEY'
     secretRef: 'llm-api-key'
   }
 ] : []
+
+var llmEnv = concat(llmProviderEnv, llmModelEnv, llmBaseUrlEnv, llmApiKeyEnv)
 
 var langsmithEnv = enableLangsmithTracing ? concat(
   [

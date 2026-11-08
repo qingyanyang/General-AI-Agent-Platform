@@ -22,15 +22,19 @@ param tags = {
 //   postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
 // Prefer building/encoding the URL in your secret store; never commit it.
 //
-// LangSmith: leave project unset so the app uses agent-platform-demo (from ENVIRONMENT=demo).
+// Demo uses DeepSeek (OpenAI-compatible). LLM_API_KEY secret must be a DeepSeek key.
+// LangSmith: APAC data plane; leave project unset → agent-platform-demo.
 param databaseUrl = readEnvironmentVariable('DATABASE_URL', '')
 param llmApiKey = readEnvironmentVariable('LLM_API_KEY', '')
 // Non-secure gates: empty(@secure()) is unreliable in ARM, so scripts/CI set these explicitly.
 param enableLlmApiKey = false
+param llmProvider = 'deepseek'
+param llmModel = ''
+param llmBaseUrl = ''
 param langsmithApiKey = readEnvironmentVariable('LANGSMITH_API_KEY', '')
 param enableLangsmithTracing = false
 param langsmithProject = ''
-param langsmithEndpoint = ''
+param langsmithEndpoint = 'https://apac.api.smith.langchain.com'
 param postgresSchema = 'public'
 
 // Phase 1: false — no Container App until a public GHCR image exists.

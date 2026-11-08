@@ -26,6 +26,19 @@ param llmApiKey string = ''
 @description('When true, wire ACA secret llm-api-key. Set from deploy scripts when LLM_API_KEY is present — do not derive via empty(secure).')
 param enableLlmApiKey bool = false
 
+@description('LLM provider for FastAPI: openai or deepseek.')
+@allowed([
+  'openai'
+  'deepseek'
+])
+param llmProvider string = 'openai'
+
+@description('Optional LLM model id override. Empty → app default.')
+param llmModel string = ''
+
+@description('Optional OpenAI-compatible base URL. Empty → app default.')
+param llmBaseUrl string = ''
+
 @secure()
 @description('LangSmith API key (optional). Used only when enableLangsmithTracing is true. CI: --parameters langsmithApiKey=... enableLangsmithTracing=true')
 param langsmithApiKey string = ''
@@ -165,6 +178,9 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     postgresSchema: postgresSchema
     llmApiKey: llmApiKey
     enableLlmApiKey: enableLlmApiKey
+    llmProvider: llmProvider
+    llmModel: llmModel
+    llmBaseUrl: llmBaseUrl
     langsmithApiKey: langsmithApiKey
     enableLangsmithTracing: enableLangsmithTracing
     langsmithProject: langsmithProject
