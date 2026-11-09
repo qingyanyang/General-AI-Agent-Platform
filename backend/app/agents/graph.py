@@ -155,8 +155,13 @@ def build_agent_graph(
     *,
     llm: BaseChatModel | None = None,
     registry: ToolRegistry | None = None,
+    checkpointer: Any | None = None,
 ) -> CompiledStateGraph:
-    """Compile the agent graph using registry-backed tools only."""
+    """Compile the agent graph using registry-backed tools only.
+
+    Pass ``checkpointer`` for durable multi-turn runs. Omit it for stateless
+    single-shot invokes (even when a saver exists on the app).
+    """
     tool_registry = registry if registry is not None else create_default_registry()
     tools = tool_registry.get_langchain_tools()
     model = llm if llm is not None else create_chat_model()
@@ -175,4 +180,6 @@ def build_agent_graph(
     graph.add_edge(START, "llm")
     graph.add_conditional_edges("llm", tools_condition, {"tools": "tools", END: END})
     graph.add_edge("tools", "llm")
-    return graph.compile()
+    if checkpointer is None:
+        return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

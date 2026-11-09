@@ -19,3 +19,6 @@ select = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+markers = [
+  "integration: requires CHECKPOINT_TEST_DATABASE_URL (Postgres checkpointer)",
+]
