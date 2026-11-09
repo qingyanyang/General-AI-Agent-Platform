@@ -1,10 +1,72 @@
+"""Shared pytest fixtures."""
+
+from __future__ import annotations
+
+from collections.abc import Generator
+
 import pytest
 from app.core.config import get_settings
+from app.core.database import get_db
 from app.main import app
+from app.models.base import Base, postgres_schema_name
+from app.models.chat_session import ChatSession  # noqa: F401
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
 def client() -> TestClient:
     get_settings.cache_clear()
     return TestClient(app)
+
+
+@pytest.fixture
+def db_engine():
+    """In-memory SQLite; schema_translate_map keeps model metadata schema-qualified."""
+    get_settings.cache_clear()
+    schema = postgres_schema_name()
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        execution_options={"schema_translate_map": {schema: None}},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _fk_on(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    yield engine
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def db_session(db_engine) -> Generator[Session, None, None]:
+    factory = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
+    session = factory()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
+def api_client(db_session: Session) -> Generator[TestClient, None, None]:
+    """TestClient with DB dependency overridden to the SQLite session."""
+
+    def _override_db() -> Generator[Session, None, None]:
+        yield db_session
+
+    get_settings.cache_clear()
+    app.dependency_overrides[get_db] = _override_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    get_settings.cache_clear()

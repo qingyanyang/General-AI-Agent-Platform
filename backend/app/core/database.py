@@ -1,7 +1,7 @@
-"""Optional database helpers.
+"""Database engine and session helpers.
 
 Engine creation is lazy so importing the app (and `/health`) does not require
-DATABASE_URL. Models / Alembic remain out of scope for issue #7.
+DATABASE_URL. Tables are schema-qualified (POSTGRES_SCHEMA); no search_path.
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ def get_engine() -> Engine:
     settings = get_settings()
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL is missing")
-    # POSTGRES_SCHEMA is loaded by Settings but not applied here yet —
-    # reserved until Alembic/models land (see backend/README.md).
     return create_engine(
         settings.database_url,
         pool_pre_ping=True,
