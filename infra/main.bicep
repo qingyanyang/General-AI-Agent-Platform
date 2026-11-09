@@ -46,10 +46,7 @@ param langsmithApiKey string = ''
 @description('When true, wire ACA secret langsmith-api-key and LANGSMITH_TRACING=true. Set from deploy scripts when LANGSMITH_API_KEY is present — do not derive via empty(secure).')
 param enableLangsmithTracing bool = false
 
-@description('Optional LangSmith project override. Empty → app default agent-platform-{ENVIRONMENT}.')
-param langsmithProject string = ''
-
-@description('Optional LangSmith API base URL. Empty → SDK default.')
+@description('Optional LangSmith API base URL. Empty → SDK default. Project name is app-derived: agent-platform-{ENVIRONMENT}.')
 param langsmithEndpoint string = ''
 
 @description('PostgreSQL schema used by FastAPI / Alembic (Supabase).')
@@ -183,7 +180,6 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     llmBaseUrl: llmBaseUrl
     langsmithApiKey: langsmithApiKey
     enableLangsmithTracing: enableLangsmithTracing
-    langsmithProject: langsmithProject
     langsmithEndpoint: langsmithEndpoint
     containerCpu: containerCpu
     containerMemory: containerMemory

@@ -23,7 +23,7 @@ param tags = {
 // Prefer building/encoding the URL in your secret store; never commit it.
 //
 // Demo uses DeepSeek (OpenAI-compatible). LLM_API_KEY secret must be a DeepSeek key.
-// LangSmith: APAC data plane; leave project unset → agent-platform-demo.
+// LangSmith: APAC endpoint; project is agent-platform-demo (from ENVIRONMENT=demo, not a Bicep param).
 param databaseUrl = readEnvironmentVariable('DATABASE_URL', '')
 param llmApiKey = readEnvironmentVariable('LLM_API_KEY', '')
 // Non-secure gates: empty(@secure()) is unreliable in ARM, so scripts/CI set these explicitly.
@@ -33,7 +33,6 @@ param llmModel = ''
 param llmBaseUrl = ''
 param langsmithApiKey = readEnvironmentVariable('LANGSMITH_API_KEY', '')
 param enableLangsmithTracing = false
-param langsmithProject = ''
 param langsmithEndpoint = 'https://apac.api.smith.langchain.com'
 param postgresSchema = 'public'
 

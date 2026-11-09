@@ -99,7 +99,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | GitHub OIDC | Azure login |
 | `DATABASE_URL` | When `deployContainerApp = true` | Supabase session-pooler URL → ACA secret `database-url` → env `DATABASE_URL` |
 | `LLM_API_KEY` | Optional | When set, scripts pass `enableLlmApiKey=true` + `llmApiKey` → ACA secret `llm-api-key`. Demo expects a **DeepSeek** key (`llmProvider=deepseek` in `demo.bicepparam`) |
-| `LANGSMITH_API_KEY` | Optional | When set, scripts pass `enableLangsmithTracing=true` + `langsmithApiKey` → ACA secret + `LANGSMITH_TRACING=true`. Project defaults to `agent-platform-demo`. Demo sets APAC `langsmithEndpoint` in params |
+| `LANGSMITH_API_KEY` | Optional | When set, scripts pass `enableLangsmithTracing=true` + `langsmithApiKey` → ACA secret + `LANGSMITH_TRACING=true`. Project is always `agent-platform-{ENVIRONMENT}` (demo → `agent-platform-demo`). Demo sets APAC `langsmithEndpoint` in params |
 | `containerImage` (param) | When `deployContainerApp = true` | Public `ghcr.io/...` reference |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | frontend-cd | SWA deploy |
 | `CONTAINER_APP_NAME` (GitHub var) | backend-cd | Image update target |

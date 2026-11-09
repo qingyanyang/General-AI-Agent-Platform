@@ -59,9 +59,6 @@ param langsmithApiKey string = ''
 @description('When true, declare ACA secret langsmith-api-key and set LANGSMITH_TRACING=true. Do not use empty() on @secure() params.')
 param enableLangsmithTracing bool = false
 
-@description('Optional LangSmith project override. Empty → app default agent-platform-{ENVIRONMENT}.')
-param langsmithProject string = ''
-
 @description('Optional LangSmith API base URL (e.g. regional endpoint). Empty → SDK default.')
 param langsmithEndpoint string = ''
 
@@ -186,6 +183,7 @@ var llmApiKeyEnv = enableLlmApiKey ? [
 
 var llmEnv = concat(llmProviderEnv, llmModelEnv, llmBaseUrlEnv, llmApiKeyEnv)
 
+// Project name is not set here — FastAPI defaults to agent-platform-{ENVIRONMENT}.
 var langsmithEnv = enableLangsmithTracing ? concat(
   [
     {
@@ -195,12 +193,6 @@ var langsmithEnv = enableLangsmithTracing ? concat(
     {
       name: 'LANGSMITH_API_KEY'
       secretRef: 'langsmith-api-key'
-    }
-  ],
-  empty(langsmithProject) ? [] : [
-    {
-      name: 'LANGSMITH_PROJECT'
-      value: langsmithProject
     }
   ],
   empty(langsmithEndpoint) ? [] : [

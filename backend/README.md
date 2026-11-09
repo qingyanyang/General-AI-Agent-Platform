@@ -53,8 +53,7 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 | `AGENT_ID` | `default` | Id stored on each trace (`metadata.agent_id`) |
 | `LANGSMITH_TRACING` | `false` | Turn on LangSmith tracing for agent runs |
 | `LANGSMITH_API_KEY` | unset | Required when tracing is on; tracing stays off if it is missing |
-| `LANGSMITH_PROJECT` | `agent-platform-{ENVIRONMENT}` | Separate projects per environment unless overridden |
-| `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL |
+| `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL (use APAC if your org is on that data plane) |
 
 `POST /agents/run` returns `execution_id`. That id is the LangSmith root run id, so a trace can be matched to the API response. A failed run returns the same id in the 502 `detail`, next to `message`. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`. API keys and the database URL are not copied into metadata. The user message and tool inputs are sent to LangSmith only while tracing is enabled.
 
