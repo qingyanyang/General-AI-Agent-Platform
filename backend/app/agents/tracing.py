@@ -46,11 +46,16 @@ def tracing_enabled(settings: Settings) -> bool:
     return settings.langsmith_tracing and has_key
 
 
-def build_run_config(settings: Settings, execution_id: UUID) -> dict[str, Any]:
+def build_run_config(
+    settings: Settings,
+    execution_id: UUID,
+    *,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
     """Runnable config. Metadata is only the correlation allowlist."""
     environment = settings.environment.strip() or "development"
     agent_id = settings.agent_id.strip() or "default"
-    return {
+    config: dict[str, Any] = {
         "recursion_limit": settings.agent_recursion_limit,
         "run_id": execution_id,
         "run_name": agent_id,
@@ -61,6 +66,9 @@ def build_run_config(settings: Settings, execution_id: UUID) -> dict[str, Any]:
         },
         "tags": [environment],
     }
+    if thread_id is not None:
+        config["configurable"] = {"thread_id": thread_id}
+    return config
 
 
 @contextmanager

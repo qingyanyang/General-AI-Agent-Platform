@@ -1,13 +1,13 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#11).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#12).
 
 ## Layout
 
 ```text
 app/
   api/           # HTTP routers (health, agents, sessions) + deps
-  agents/        # LangGraph runtime (state, tools registry, graph, invoke)
+  agents/        # LangGraph runtime (state, tools, checkpointer, graph, invoke)
   core/          # Config, logging, errors, database helpers
   models/        # SQLAlchemy ORM (schema-qualified)
   schemas/       # Pydantic request/response models
@@ -86,7 +86,39 @@ curl -s http://localhost:8000/agents/run \
 
 Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 
-`DATABASE_URL` is optional for `/health` but required for session APIs and Alembic.
+`DATABASE_URL` is optional for `/health` but required for session APIs, Alembic, and the LangGraph checkpointer.
+
+### PostgreSQL checkpointer (#12)
+
+On startup, if `DATABASE_URL` is set, the app opens an `AsyncConnectionPool` + `AsyncPostgresSaver`, runs `setup()`, and stores the saver on `app.state`. Pool connections use `autocommit=True`, `row_factory=dict_row`, and `search_path` set to `CHECKPOINTS_SCHEMA` (default `langgraph`). Checkpoint tables are **not** Alembic/ORM models — they stay separate from `POSTGRES_SCHEMA`. Prefer a **session** pooler (not transaction pooler) for psycopg.
+
+If `DATABASE_URL` is unset, the checkpointer stays disabled (stateless runs only). If `DATABASE_URL` is set but pool/setup fails, startup fails after closing allocated resources.
+
+| Request | Behaviour |
+| --- | --- |
+| No `session_id` | Graph compiled **without** a checkpointer (stateless), even if a saver exists |
+| Owned active `session_id` + saver available | Checkpointed graph; `thread_id = str(session.id)` |
+| `session_id` + saver unavailable | **503** (before identity/ownership DB queries) |
+
+Durable turns require `X-User-Id` and a session UUID that belongs to that user and is not archived (unknown / other-user / archived → **404**). Clients never pass a raw `thread_id`. Each turn sends only the new user message; checkpoint restore retains history.
+
+**Restart recovery** means continuing a conversation from persisted checkpoint state after recreating the pool/saver/graph (e.g. process restart). It does **not** automatically resume an interrupted HTTP request.
+
+Example (after creating a session):
+
+```bash
+curl -s http://localhost:8000/agents/run \
+  -H 'content-type: application/json' \
+  -H 'X-User-Id: demo-user-1' \
+  -d '{"message":"What is 2 + 3?","session_id":"<session-uuid>"}'
+```
+
+Postgres checkpointer integration tests require a dedicated URL (never the app `DATABASE_URL`):
+
+```bash
+export CHECKPOINT_TEST_DATABASE_URL='postgresql+psycopg://...'
+pytest -m integration
+```
 
 ### Agent / LLM env
 
@@ -103,6 +135,7 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 | `LANGSMITH_API_KEY` | unset | Required when tracing is on; tracing stays off if it is missing |
 | `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL (use APAC if your org is on that data plane) |
 | `POSTGRES_SCHEMA` | `agent_platform` | Schema for ORM tables / Alembic version table |
+| `CHECKPOINTS_SCHEMA` | `langgraph` | Schema for LangGraph checkpoint tables |
 
 `POST /agents/run` returns `execution_id`. That id is the LangSmith root run id. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`.
 
@@ -116,6 +149,7 @@ Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins:
 ruff check app tests
 ruff format --check app tests
 pytest
+# optional: CHECKPOINT_TEST_DATABASE_URL=... pytest -m integration
 ```
 
 ## Docker
@@ -127,4 +161,4 @@ docker run --rm -p 8000:8000 -e ENVIRONMENT=demo agent-platform-api:local
 
 ## Azure
 
-Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, optional `LLM_API_KEY` / LangSmith). Run `alembic upgrade head` against Supabase before relying on session APIs in demo. `backend-cd` builds/pushes GHCR and updates the Container App image only.
+Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, optional `LLM_API_KEY` / LangSmith). Set `CHECKPOINTS_SCHEMA` when overriding the default `langgraph` checkpoint schema. Run `alembic upgrade head` against Supabase before relying on session APIs in demo; checkpointer tables are created by `AsyncPostgresSaver.setup()` on app startup. `backend-cd` builds/pushes GHCR and updates the Container App image only.

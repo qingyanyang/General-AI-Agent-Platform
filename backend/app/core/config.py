@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str | None = None
     postgres_schema: str = "agent_platform"
+    # Separate schema for LangGraph checkpoint tables (not ORM / Alembic).
+    checkpoints_schema: str = "langgraph"
     cors_allowed_origins: str = "http://localhost:5173"
     # openai (default) | deepseek — DeepSeek uses the OpenAI-compatible Chat Completions API
     llm_provider: str = "openai"

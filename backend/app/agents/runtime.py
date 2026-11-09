@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -79,22 +80,43 @@ async def run_agent(
     message: str,
     *,
     llm: BaseChatModel | None = None,
+    checkpointer: Any | None = None,
+    thread_id: str | None = None,
 ) -> AgentResult:
-    """Run the agent graph once for a user message."""
+    """Run the agent graph for a user message.
+
+    Stateless path (``thread_id is None``): compile without a checkpointer.
+    Durable path (``thread_id`` set): require ``checkpointer`` and compile with it.
+    Each turn passes only the new ``HumanMessage``; checkpoint restore retains history.
+    """
     settings = get_settings()
     if llm is None and not settings.resolve_llm_api_key():
         raise AgentNotConfiguredError(
             "LLM API key is not configured; cannot run the agent",
         )
 
+    if thread_id is not None and checkpointer is None:
+        raise AgentNotConfiguredError(
+            "Conversation persistence is not configured",
+        )
+
     execution_id = uuid.uuid4()
     execution_id_text = str(execution_id)
+    use_checkpointer = thread_id is not None
     try:
-        graph = build_agent_graph(llm=llm)
+        graph = build_agent_graph(
+            llm=llm,
+            checkpointer=checkpointer if use_checkpointer else None,
+        )
+        config = build_run_config(
+            settings,
+            execution_id,
+            thread_id=thread_id if use_checkpointer else None,
+        )
         with langsmith_tracing(settings):
             result = await graph.ainvoke(
                 {"messages": [HumanMessage(content=message)]},
-                config=build_run_config(settings, execution_id),
+                config=config,
             )
     except AgentNotConfiguredError:
         raise

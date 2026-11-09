@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 
 import pytest
@@ -17,14 +18,19 @@ from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+    """HTTP client with checkpointer disabled (no DATABASE_URL for unit tests)."""
+    monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
+    get_settings.cache_clear()
 
 
 @pytest.fixture
-def db_engine():
+def db_engine(monkeypatch: pytest.MonkeyPatch):
     """In-memory SQLite; schema_translate_map keeps model metadata schema-qualified."""
+    monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
     schema = postgres_schema_name()
     engine = create_engine(
@@ -58,15 +64,25 @@ def db_session(db_engine) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def api_client(db_session: Session) -> Generator[TestClient, None, None]:
+def api_client(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
     """TestClient with DB dependency overridden to the SQLite session."""
 
     def _override_db() -> Generator[Session, None, None]:
         yield db_session
 
+    monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
     app.dependency_overrides[get_db] = _override_db
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
     get_settings.cache_clear()
+
+
+def checkpoint_test_database_url() -> str | None:
+    """Dedicated Postgres URL for checkpointer integration tests (no app DB fallback)."""
+    value = os.environ.get("CHECKPOINT_TEST_DATABASE_URL", "").strip()
+    return value or None
