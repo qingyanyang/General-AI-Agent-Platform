@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,7 +12,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.messages import normalize_message_views
 from app.agents.runtime import run_agent
-from app.models.chat_session import ChatSession
 from app.schemas.chat_message import ChatMessageOut
 
 
@@ -44,11 +44,11 @@ async def post_user_message(
     *,
     content: str,
     checkpointer: BaseCheckpointSaver,
-    chat_session: ChatSession,
+    session_id: uuid.UUID,
     llm: BaseChatModel | None = None,
 ) -> tuple[str, ChatMessageOut]:
     """Run a durable agent turn for the session; return execution_id and assistant message."""
-    thread_id = thread_id_for_session(chat_session.id)
+    thread_id = thread_id_for_session(session_id)
     result = await run_agent(
         content,
         llm=llm,

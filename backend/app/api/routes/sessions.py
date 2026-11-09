@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -13,6 +14,7 @@ from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.api.deps import get_current_user_id
 from app.core.database import get_db
+from app.models.chat_session import ChatSession
 from app.schemas.chat_message import (
     ChatMessageCreate,
     ChatMessageCreateResult,
@@ -29,6 +31,18 @@ from app.services import chat_sessions as session_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+@contextmanager
+def _db_session(request: Request) -> Session:
+    """Open a short-lived DB session; honor FastAPI dependency_overrides used in tests."""
+    override = request.app.dependency_overrides.get(get_db)
+    generator = override() if override is not None else get_db()
+    session = next(generator)
+    try:
+        yield session
+    finally:
+        generator.close()
 
 
 @router.post("", response_model=ChatSessionOut, status_code=status.HTTP_201_CREATED)
@@ -125,19 +139,22 @@ async def create_message(
     body: ChatMessageCreate,
     request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    db: Annotated[Session, Depends(get_db)],
 ) -> ChatMessageCreateResult:
     checkpointer = _require_checkpointer(request)
-    chat_session = session_service.get_active_session_for_user(
-        db,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    # Short-lived DB scope for ownership only — do not hold the connection across LLM work.
+    with _db_session(request) as db:
+        chat_session = session_service.get_active_session_for_user(
+            db,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        owned_session_id = chat_session.id
+
     try:
         execution_id, message = await message_service.post_user_message(
             content=body.content,
             checkpointer=checkpointer,
-            chat_session=chat_session,
+            session_id=owned_session_id,
         )
     except AgentNotConfiguredError as exc:
         raise HTTPException(
@@ -154,12 +171,18 @@ async def create_message(
         ) from exc
 
     try:
-        session_service.touch_last_activity(db, chat_session)
+        with _db_session(request) as db:
+            try:
+                session = db.get(ChatSession, owned_session_id)
+                if session is not None:
+                    session_service.touch_last_activity(db, session)
+            except Exception:
+                db.rollback()
+                raise
     except Exception:  # noqa: BLE001 — metadata must not fail a successful turn
-        db.rollback()
         logger.exception(
             "Failed to update last_activity_at for session %s after successful message",
-            chat_session.id,
+            owned_session_id,
         )
 
     return ChatMessageCreateResult(execution_id=execution_id, message=message)
