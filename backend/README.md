@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#12).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#13).
 
 ## Layout
 
@@ -64,6 +64,37 @@ curl -s http://localhost:8000/sessions \
 ```
 
 Tables live in PostgreSQL schema `POSTGRES_SCHEMA` (default `agent_platform` from `DEFAULT_POSTGRES_SCHEMA`), schema-qualified in SQLAlchemy/Alembic (no engine `search_path`). Migrations and runtime must use the same schema name — do not change `POSTGRES_SCHEMA` without aligning Alembic revisions.
+
+### Chat messages (#13)
+
+Canonical multi-turn chat API. History is read from the LangGraph **checkpoint** (not a separate messages table).
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/sessions/{id}/messages` | Body `{ "content" }` → `{ "execution_id", "message": { "role", "content" } }` |
+| `GET` | `/sessions/{id}/messages` | `{ "items": [ { "role", "content" }, ... ] }` (empty list if none) |
+
+**Validation:** `content` max **32_000** characters; whitespace-only rejected (**422**); leading/trailing trim only — internal newlines/spaces preserved.
+
+**Error precedence** (FastAPI `Depends` may return **422** for headers/body first):
+
+1. Saver unavailable → **503** (POST and GET)
+2. Unknown / archived / other-user session → **404**
+3. LLM not configured → **503** (**POST only**; GET never checks LLM)
+4. Agent execution failure → **502** (POST only)
+
+**Failed runs:** A **502** does not mean nothing was saved. The checkpoint may already contain the new user message (and tool turns). Retrying the same POST may **duplicate** the user message in history.
+
+**Activity:** After a successful POST, `last_activity_at` is updated on the request-scoped DB session. Checkpoint writes and that ORM update are not atomic. If the timestamp update fails, the API rolls back the ORM transaction, logs the metadata failure, and still returns **200** with the assistant reply.
+
+```bash
+curl -s http://localhost:8000/sessions/<session-uuid>/messages \
+  -H 'X-User-Id: demo-user-1' \
+  -H 'content-type: application/json' \
+  -d '{"content":"What is 2 + 3?"}'
+```
+
+`POST /agents/run` remains available for ad-hoc/stateless invokes (and optional `session_id` from #12).
 
 ### Migrations
 

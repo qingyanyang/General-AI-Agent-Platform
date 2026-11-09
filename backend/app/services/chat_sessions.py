@@ -135,3 +135,10 @@ def archive_session(
     if session.archived_at is None:
         session.archived_at = _utcnow()
         db.commit()
+
+
+def touch_last_activity(db: Session, session: ChatSession) -> None:
+    """Bump ``last_activity_at`` and commit (not atomic with checkpoint writes)."""
+    session.last_activity_at = _utcnow()
+    db.commit()
+    db.refresh(session)
