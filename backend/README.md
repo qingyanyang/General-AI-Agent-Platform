@@ -1,15 +1,18 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#10).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#11).
 
 ## Layout
 
 ```text
 app/
-  api/           # HTTP routers (health, agents)
+  api/           # HTTP routers (health, agents, sessions) + deps
   agents/        # LangGraph runtime (state, tools registry, graph, invoke)
-  core/          # Config, logging, errors, optional DB helpers
-  services/      # Domain services (future)
+  core/          # Config, logging, errors, database helpers
+  models/        # SQLAlchemy ORM (schema-qualified)
+  schemas/       # Pydantic request/response models
+  services/      # Domain services (chat sessions, …)
+alembic/         # Migrations (POSTGRES_SCHEMA bootstrapped in env.py)
 tests/
 ```
 
@@ -21,12 +24,59 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
+# set DATABASE_URL for migrations / session APIs
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
 Health: `GET http://localhost:8000/health`
 
-Agent invoke (requires `LLM_API_KEY`):
+### Identity stub (development only)
+
+Protected session routes require header:
+
+```http
+X-User-Id: <opaque-non-empty-id>
+```
+
+Max length 128. Missing, blank, or oversized values return **422**.
+
+This is a temporary stand-in until **OIDC/JWT (#15)** replaces `get_current_user_id` in `app/api/deps.py` with a validated identity while keeping the same dependency signature.
+
+### Chat sessions (#11)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/sessions` | Body `{ "agent_id", "title"? }` → 201 |
+| `GET` | `/sessions` | Cursor list: `limit` (1–100, default 20), `cursor?` |
+| `GET` | `/sessions/{id}` | Own non-archived session or 404 |
+| `DELETE` | `/sessions/{id}` | Soft-archive; owner repeat → 204; other user → 404 |
+
+List response: `{ "items": [...], "next_cursor": string | null }`. Ordering is `last_activity_at DESC, id DESC`. This is a **live list** — later activity updates can move sessions between pages (not snapshot-stable). Malformed `cursor` → **422**.
+
+Example:
+
+```bash
+curl -s http://localhost:8000/sessions \
+  -H 'X-User-Id: demo-user-1' \
+  -H 'content-type: application/json' \
+  -d '{"agent_id":"default"}'
+```
+
+Tables live in PostgreSQL schema `POSTGRES_SCHEMA` (default `agent_platform` from `DEFAULT_POSTGRES_SCHEMA`), schema-qualified in SQLAlchemy/Alembic (no engine `search_path`). Migrations and runtime must use the same schema name — do not change `POSTGRES_SCHEMA` without aligning Alembic revisions.
+
+### Migrations
+
+Alembic creates the schema **before** the version table (`alembic/env.py`), then applies revisions:
+
+```bash
+alembic upgrade head
+alembic revision --autogenerate -m "message"   # after model changes
+```
+
+SQLite unit tests use `schema_translate_map` and do **not** replace running migrations against Postgres.
+
+### Agent invoke
 
 ```bash
 curl -s http://localhost:8000/agents/run \
@@ -36,9 +86,7 @@ curl -s http://localhost:8000/agents/run \
 
 Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 
-`DATABASE_URL` is optional for `/health`. Importing `app.core.database` helpers requires it.
-
-`POSTGRES_SCHEMA` is accepted via env / Settings for Container App parity, but is **not** applied to the SQLAlchemy engine yet (no `search_path` / connect options). Treat it as reserved until Alembic and models are added.
+`DATABASE_URL` is optional for `/health` but required for session APIs and Alembic.
 
 ### Agent / LLM env
 
@@ -54,16 +102,13 @@ Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
 | `LANGSMITH_TRACING` | `false` | Turn on LangSmith tracing for agent runs |
 | `LANGSMITH_API_KEY` | unset | Required when tracing is on; tracing stays off if it is missing |
 | `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL (use APAC if your org is on that data plane) |
+| `POSTGRES_SCHEMA` | `agent_platform` | Schema for ORM tables / Alembic version table |
 
-`POST /agents/run` returns `execution_id`. That id is the LangSmith root run id, so a trace can be matched to the API response. A failed run returns the same id in the 502 `detail`, next to `message`. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`. API keys and the database URL are not copied into metadata. The user message and tool inputs are sent to LangSmith only while tracing is enabled.
-
-If LangSmith is disabled, the key is missing, or the LangSmith client raises, the agent run still completes. Each run sets `LANGSMITH_TRACING` / `LANGSMITH_TRACING_V2` from these settings and restores the previous process environment afterward.
-
-DeepSeek uses the same `ChatOpenAI` client ([docs](https://api-docs.deepseek.com/)): base URL `https://api.deepseek.com`, models `deepseek-flash` / `deepseek-v4-pro`, with OpenAI-style tool calling. Do not commit real keys — use local `.env` only.
+`POST /agents/run` returns `execution_id`. That id is the LangSmith root run id. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`.
 
 ### Tool registry
 
-Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`. The LangGraph tools node executes **only** registered tools; unknown names and validation/runtime failures return `ToolMessage` errors so the agent loop can continue safely.
+Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`.
 
 ## Quality
 
@@ -82,4 +127,4 @@ docker run --rm -p 8000:8000 -e ENVIRONMENT=demo agent-platform-api:local
 
 ## Azure
 
-Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, optional `LLM_API_KEY`). App-only agent settings (`LLM_MODEL`, `LLM_BASE_URL`, `AGENT_RECURSION_LIMIT`) can be added to the Container App when needed. `backend-cd` builds/pushes GHCR and updates the Container App image only.
+Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, optional `LLM_API_KEY` / LangSmith). Run `alembic upgrade head` against Supabase before relying on session APIs in demo. `backend-cd` builds/pushes GHCR and updates the Container App image only.
