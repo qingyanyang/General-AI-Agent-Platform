@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.errors import GraphRecursionError
 
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.graph import build_agent_graph
+from app.agents.messages import extract_assistant_reply, normalize_message_views
 from app.agents.tracing import build_run_config, langsmith_tracing
 from app.core.config import get_settings
 
@@ -32,48 +33,11 @@ class AgentResult:
     execution_id: str
 
 
-def _message_role(message: BaseMessage) -> str:
-    type_name = message.type
-    if type_name == "human":
-        return "user"
-    if type_name == "ai":
-        return "assistant"
-    if type_name == "tool":
-        return "tool"
-    if type_name == "system":
-        return "system"
-    return type_name
-
-
-def _message_content(message: BaseMessage) -> str:
-    content = message.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and item.get("type") == "text":
-                parts.append(str(item.get("text", "")))
-        return "".join(parts)
-    return str(content)
-
-
 def _normalize_messages(messages: list[BaseMessage]) -> list[AgentMessageView]:
     return [
-        AgentMessageView(role=_message_role(message), content=_message_content(message))
-        for message in messages
+        AgentMessageView(role=role, content=content)
+        for role, content in normalize_message_views(messages)
     ]
-
-
-def _extract_reply(messages: list[BaseMessage]) -> str:
-    for message in reversed(messages):
-        if isinstance(message, AIMessage) and not message.tool_calls:
-            text = _message_content(message)
-            if text:
-                return text
-    return ""
 
 
 async def run_agent(
@@ -134,7 +98,7 @@ async def run_agent(
 
     messages = list(result.get("messages", []))
     return AgentResult(
-        reply=_extract_reply(messages),
+        reply=extract_assistant_reply(messages),
         messages=_normalize_messages(messages),
         execution_id=execution_id_text,
     )
