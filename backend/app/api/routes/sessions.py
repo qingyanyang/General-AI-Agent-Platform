@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
+from app.agents.runtime import StreamOutcome, ensure_llm_configured
 from app.api.deps import get_current_user_id
 from app.core.database import get_db
 from app.models.chat_session import ChatSession
@@ -19,6 +22,9 @@ from app.schemas.chat_message import (
     ChatMessageCreate,
     ChatMessageCreateResult,
     ChatMessageListOut,
+    StreamDone,
+    StreamEvent,
+    format_sse,
 )
 from app.schemas.chat_session import (
     ChatSessionCreate,
@@ -103,6 +109,24 @@ def delete_session(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _touch_session_activity(request: Request, session_id: uuid.UUID) -> None:
+    """Best-effort last_activity update. Failures are logged and do not raise."""
+    try:
+        with _db_session(request) as db:
+            try:
+                session = db.get(ChatSession, session_id)
+                if session is not None:
+                    session_service.touch_last_activity(db, session)
+            except Exception:
+                db.rollback()
+                raise
+    except Exception:  # noqa: BLE001 — metadata must not fail a successful turn
+        logger.exception(
+            "Failed to update last_activity_at for session %s after successful message",
+            session_id,
+        )
+
+
 def _require_checkpointer(request: Request):
     checkpointer = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
@@ -170,19 +194,105 @@ async def create_message(
             detail=detail,
         ) from exc
 
-    try:
-        with _db_session(request) as db:
-            try:
-                session = db.get(ChatSession, owned_session_id)
-                if session is not None:
-                    session_service.touch_last_activity(db, session)
-            except Exception:
-                db.rollback()
-                raise
-    except Exception:  # noqa: BLE001 — metadata must not fail a successful turn
-        logger.exception(
-            "Failed to update last_activity_at for session %s after successful message",
-            owned_session_id,
-        )
-
+    _touch_session_activity(request, owned_session_id)
     return ChatMessageCreateResult(execution_id=execution_id, message=message)
+
+
+async def _cancel_when_disconnected(
+    request: Request,
+    producer: asyncio.Task[None],
+    disconnected: asyncio.Event,
+) -> None:
+    """Cancel the producer task that owns the graph iterator.
+
+    This task is the only reader of the ASGI receive channel, so cancellation
+    does not wait for the next model chunk. The producer closes the iterator
+    in ``finally``; this watcher never calls ``aclose()``.
+    """
+    try:
+        while not producer.done():
+            message = await request.receive()
+            if message["type"] == "http.disconnect":
+                disconnected.set()
+                producer.cancel()
+                return
+    except asyncio.CancelledError:
+        raise
+
+
+@router.post("/{session_id}/messages/stream")
+async def stream_message(
+    session_id: uuid.UUID,
+    body: ChatMessageCreate,
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> StreamingResponse:
+    checkpointer = _require_checkpointer(request)
+    with _db_session(request) as db:
+        chat_session = session_service.get_active_session_for_user(
+            db,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        owned_session_id = chat_session.id
+    try:
+        ensure_llm_configured()
+    except AgentNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    outcome = StreamOutcome()
+
+    async def _events():
+        queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
+
+        async def _produce() -> None:
+            try:
+                async for event in message_service.stream_user_message(
+                    content=body.content,
+                    checkpointer=checkpointer,
+                    session_id=owned_session_id,
+                    outcome=outcome,
+                ):
+                    queue.put_nowait(event)
+            except asyncio.CancelledError:
+                raise
+            finally:
+                queue.put_nowait(None)
+
+        producer = asyncio.create_task(_produce())
+        disconnected = asyncio.Event()
+        watcher = asyncio.create_task(
+            _cancel_when_disconnected(request, producer, disconnected),
+        )
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield format_sse(item)
+            if outcome.failed or outcome.message is None or disconnected.is_set():
+                return
+            _touch_session_activity(request, owned_session_id)
+            await asyncio.sleep(0)
+            if disconnected.is_set():
+                return
+            yield format_sse(
+                StreamDone(execution_id=outcome.execution_id, message=outcome.message),
+            )
+        finally:
+            watcher.cancel()
+            if not producer.done():
+                producer.cancel()
+            await asyncio.gather(producer, watcher, return_exceptions=True)
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

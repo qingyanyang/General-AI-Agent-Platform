@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -24,6 +26,21 @@ from app.agents.tools import (
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Tasks currently executing a graph node. stream_agent sets this so a cancelled
+# producer can cancel nodes LangGraph scheduled with their own tasks.
+inflight_node_tasks: ContextVar[set[asyncio.Task[Any]] | None] = ContextVar(
+    "inflight_node_tasks",
+    default=None,
+)
+
+
+def _note_inflight_task() -> None:
+    bucket = inflight_node_tasks.get()
+    task = asyncio.current_task()
+    if bucket is not None and task is not None:
+        bucket.add(task)
+
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
@@ -185,10 +202,16 @@ def build_agent_graph(
     model_with_tools = model.bind_tools(tools)
 
     async def llm_node(state: AgentState) -> dict:
-        response = await model_with_tools.ainvoke(state["messages"])
-        return {"messages": [response]}
+        _note_inflight_task()
+        merged = None
+        async for chunk in model_with_tools.astream(state["messages"]):
+            merged = chunk if merged is None else merged + chunk
+        if merged is None:
+            return {"messages": [AIMessage(content="")]}
+        return {"messages": [merged]}
 
     async def tools_node(state: AgentState) -> dict:
+        _note_inflight_task()
         return await _execute_registered_tools(state, tool_registry)
 
     graph = StateGraph(AgentState)

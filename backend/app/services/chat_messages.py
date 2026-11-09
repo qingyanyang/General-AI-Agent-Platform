@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,8 +12,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.messages import normalize_message_views
-from app.agents.runtime import run_agent
-from app.schemas.chat_message import ChatMessageOut
+from app.agents.runtime import StreamOutcome, run_agent, stream_agent
+from app.schemas.chat_message import ChatMessageOut, StreamEvent
 
 
 def _messages_from_checkpoint(checkpoint: dict[str, Any] | None) -> list[BaseMessage]:
@@ -56,3 +57,23 @@ async def post_user_message(
         thread_id=thread_id,
     )
     return result.execution_id, ChatMessageOut(role="assistant", content=result.reply)
+
+
+async def stream_user_message(
+    *,
+    content: str,
+    checkpointer: BaseCheckpointSaver,
+    session_id: uuid.UUID,
+    outcome: StreamOutcome,
+    llm: BaseChatModel | None = None,
+) -> AsyncIterator[StreamEvent]:
+    """Stream a durable turn. The caller emits ``done`` after a successful outcome."""
+    thread_id = thread_id_for_session(session_id)
+    async for event in stream_agent(
+        content,
+        llm=llm,
+        checkpointer=checkpointer,
+        thread_id=thread_id,
+        outcome=outcome,
+    ):
+        yield event
