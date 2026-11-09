@@ -258,3 +258,27 @@ def test_psycopg_conninfo_strips_driver() -> None:
     assert (
         psycopg_conninfo("postgresql+psycopg://u:p@localhost/db") == "postgresql://u:p@localhost/db"
     )
+
+
+def test_build_agent_graph_caches_default_llm_path(monkeypatch: MonkeyPatch) -> None:
+    from app.agents.graph import build_agent_graph, clear_agent_graph_cache
+
+    clear_agent_graph_cache()
+    monkeypatch.setattr(
+        "app.agents.graph.create_chat_model",
+        lambda: ScriptedChatModel(script=[AIMessage(content="cached")]),
+    )
+
+    stateless_a = build_agent_graph()
+    stateless_b = build_agent_graph()
+    assert stateless_a is stateless_b
+
+    saver = InMemorySaver()
+    durable_a = build_agent_graph(checkpointer=saver)
+    durable_b = build_agent_graph(checkpointer=saver)
+    assert durable_a is durable_b
+    assert durable_a is not stateless_a
+
+    injected_a = build_agent_graph(llm=ScriptedChatModel(script=[]))
+    injected_b = build_agent_graph(llm=ScriptedChatModel(script=[]))
+    assert injected_a is not injected_b

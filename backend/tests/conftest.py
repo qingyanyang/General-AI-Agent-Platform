@@ -6,6 +6,7 @@ import os
 from collections.abc import Generator
 
 import pytest
+from app.agents.graph import clear_agent_graph_cache
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.main import app
@@ -15,6 +16,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+@pytest.fixture(autouse=True)
+def _clear_agent_graph_cache() -> Generator[None, None, None]:
+    clear_agent_graph_cache()
+    yield
+    clear_agent_graph_cache()
 
 
 @pytest.fixture
