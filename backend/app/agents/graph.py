@@ -151,6 +151,15 @@ async def _execute_registered_tools(
     return {"messages": outputs}
 
 
+# Production-path cache (llm/registry defaulted). Keyed by checkpointer identity.
+_graph_cache: dict[int | None, CompiledStateGraph] = {}
+
+
+def clear_agent_graph_cache() -> None:
+    """Drop cached compiled graphs (tests / settings changes)."""
+    _graph_cache.clear()
+
+
 def build_agent_graph(
     *,
     llm: BaseChatModel | None = None,
@@ -161,7 +170,15 @@ def build_agent_graph(
 
     Pass ``checkpointer`` for durable multi-turn runs. Omit it for stateless
     single-shot invokes (even when a saver exists on the app).
+
+    When ``llm`` and ``registry`` are omitted, compiled graphs are cached per
+    checkpointer instance for the process lifetime.
     """
+    use_cache = llm is None and registry is None
+    cache_key: int | None = id(checkpointer) if checkpointer is not None else None
+    if use_cache and cache_key in _graph_cache:
+        return _graph_cache[cache_key]
+
     tool_registry = registry if registry is not None else create_default_registry()
     tools = tool_registry.get_langchain_tools()
     model = llm if llm is not None else create_chat_model()
@@ -180,6 +197,7 @@ def build_agent_graph(
     graph.add_edge(START, "llm")
     graph.add_conditional_edges("llm", tools_condition, {"tools": "tools", END: END})
     graph.add_edge("tools", "llm")
-    if checkpointer is None:
-        return graph.compile()
-    return graph.compile(checkpointer=checkpointer)
+    compiled = graph.compile() if checkpointer is None else graph.compile(checkpointer=checkpointer)
+    if use_cache:
+        _graph_cache[cache_key] = compiled
+    return compiled
