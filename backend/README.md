@@ -63,7 +63,7 @@ curl -s http://localhost:8000/sessions \
   -d '{"agent_id":"default"}'
 ```
 
-Tables live in PostgreSQL schema `POSTGRES_SCHEMA` (default `agent_platform`), schema-qualified in SQLAlchemy/Alembic (no engine `search_path`).
+Tables live in PostgreSQL schema `POSTGRES_SCHEMA` (default `agent_platform` from `DEFAULT_POSTGRES_SCHEMA`), schema-qualified in SQLAlchemy/Alembic (no engine `search_path`). Migrations and runtime must use the same schema name — do not change `POSTGRES_SCHEMA` without aligning Alembic revisions.
 
 ### Migrations
 

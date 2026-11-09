@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from functools import lru_cache
 
+from fastapi import HTTPException, status
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -36,6 +37,12 @@ def check_database() -> None:
 
 
 def get_db() -> Generator[Session, None, None]:
+    settings = get_settings()
+    if not settings.database_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not configured",
+        )
     session = get_session_factory()()
     try:
         yield session

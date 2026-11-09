@@ -30,8 +30,12 @@ def get_url() -> str:
     return settings.database_url
 
 
+def schema_bootstrap_sql() -> str:
+    return f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'
+
+
 def ensure_schema(connection) -> None:  # noqa: ANN001
-    connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+    connection.execute(text(schema_bootstrap_sql()))
     connection.commit()
 
 
@@ -47,6 +51,8 @@ def run_migrations_offline() -> None:
     )
 
     with context.begin_transaction():
+        # Emit schema bootstrap before the version table / revisions (parity with online).
+        context.execute(text(schema_bootstrap_sql()))
         context.run_migrations()
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, Uuid, func
+from sqlalchemy import DateTime, Index, String, Uuid, desc, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, postgres_schema_name
@@ -17,7 +17,7 @@ class ChatSession(Base):
         Index(
             "ix_chat_sessions_user_last_activity",
             "user_id",
-            "last_activity_at",
+            desc("last_activity_at"),
         ),
         Index("ix_chat_sessions_user_id_id", "user_id", "id"),
         {"schema": postgres_schema_name()},

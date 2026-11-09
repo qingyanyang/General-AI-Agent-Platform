@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 USER_A = "user-a"
@@ -12,6 +13,30 @@ USER_B = "user-b"
 
 def _headers(user_id: str) -> dict[str, str]:
     return {"X-User-Id": user_id}
+
+
+def test_missing_database_url_returns_503(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import Settings, get_settings
+    from app.core.database import get_engine
+
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    monkeypatch.setattr(
+        "app.core.database.get_settings",
+        lambda: Settings(database_url=None),
+    )
+    response = client.post(
+        "/sessions",
+        json={"agent_id": "default"},
+        headers=_headers(USER_A),
+    )
+    assert response.status_code == 503
+    assert "Database" in response.json()["detail"]
+    get_settings.cache_clear()
+    get_engine.cache_clear()
 
 
 def test_missing_user_header_returns_422(api_client: TestClient) -> None:
