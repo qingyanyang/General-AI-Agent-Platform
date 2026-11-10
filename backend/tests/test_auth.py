@@ -17,6 +17,7 @@ from app.core.auth import (
     AuthRejected,
     AuthUnavailable,
     JwksCache,
+    fetch_jwks,
     normalize_auth0_domain,
     verify_access_token,
 )
@@ -447,6 +448,90 @@ def test_jwks_cooldown_preserves_failed_refresh_as_503() -> None:
         with pytest.raises(AuthUnavailable):
             await cache.get_key("any")
         assert calls == 2
+
+    asyncio.run(run())
+
+
+def test_jwks_failed_refresh_reuses_cached_kid() -> None:
+    clock = {"now": 0.0}
+    key = object()
+    calls = 0
+
+    async def fetch() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"known": key}
+        raise AuthUnavailable
+
+    cache = JwksCache(
+        fetch,
+        ttl_seconds=10,
+        cooldown_seconds=5,
+        clock=lambda: clock["now"],
+    )
+
+    async def run() -> None:
+        assert await cache.get_key("known") is key
+        clock["now"] = 11.0
+        assert await cache.get_key("known") is key
+        assert calls == 2
+        clock["now"] = 14.0
+        assert await cache.get_key("known") is key
+        assert calls == 2
+        with pytest.raises(AuthUnavailable):
+            await cache.get_key("missing")
+        assert calls == 2
+
+    asyncio.run(run())
+
+
+def test_jwks_redirect_is_unavailable() -> None:
+    async def run() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(302, headers={"location": "https://evil.example/jwks"})
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False) as client:
+            with pytest.raises(AuthUnavailable):
+                await fetch_jwks(client, f"https://{AUTH0_DOMAIN}/.well-known/jwks.json")
+
+    asyncio.run(run())
+
+
+def test_jwks_cache_for_concurrent_installs_once() -> None:
+    from app.api.deps import jwks_cache_for
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+
+    app = Starlette()
+    app.state.auth_http_client = httpx.AsyncClient()
+    app.state.jwks_cache = None
+    app.state.jwks_cache_lock = asyncio.Lock()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+        "app": app,
+    }
+    request = Request(scope)
+
+    async def run() -> None:
+        first, second = await asyncio.gather(
+            jwks_cache_for(request, AUTH0_DOMAIN),
+            jwks_cache_for(request, AUTH0_DOMAIN),
+        )
+        assert first is second
+        assert app.state.jwks_cache is first
+        await app.state.auth_http_client.aclose()
 
     asyncio.run(run())
 

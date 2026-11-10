@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -30,22 +31,35 @@ _UNAUTHORIZED = "Not authenticated"
 _UNAUTHORIZED_HEADERS = {"WWW-Authenticate": "Bearer"}
 
 
-def jwks_cache_for(request: Request, domain: str) -> JwksCache:
+def _jwks_cache_lock(request: Request) -> asyncio.Lock:
+    lock = getattr(request.app.state, "jwks_cache_lock", None)
+    if isinstance(lock, asyncio.Lock):
+        return lock
+    lock = asyncio.Lock()
+    request.app.state.jwks_cache_lock = lock
+    return lock
+
+
+async def jwks_cache_for(request: Request, domain: str) -> JwksCache:
     """Return the process cache for ``domain``, building it from the shared client."""
     existing: Any = getattr(request.app.state, "jwks_cache", None)
     if isinstance(existing, JwksCache) and existing.domain == domain:
         return existing
-    client = getattr(request.app.state, "auth_http_client", None)
-    if not isinstance(client, httpx.AsyncClient):
-        raise AuthUnavailable
-    url = jwks_url_for_domain(domain)
+    async with _jwks_cache_lock(request):
+        existing = getattr(request.app.state, "jwks_cache", None)
+        if isinstance(existing, JwksCache) and existing.domain == domain:
+            return existing
+        client = getattr(request.app.state, "auth_http_client", None)
+        if not isinstance(client, httpx.AsyncClient):
+            raise AuthUnavailable
+        url = jwks_url_for_domain(domain)
 
-    async def fetch() -> dict[str, Any]:
-        return await fetch_jwks(client, url)
+        async def fetch() -> dict[str, Any]:
+            return await fetch_jwks(client, url)
 
-    cache = JwksCache(fetch, domain=domain)
-    request.app.state.jwks_cache = cache
-    return cache
+        cache = JwksCache(fetch, domain=domain)
+        request.app.state.jwks_cache = cache
+        return cache
 
 
 async def get_current_user_id(request: Request) -> str:
@@ -64,7 +78,7 @@ async def get_current_user_id(request: Request) -> str:
             token,
             issuer=issuer_for_domain(domain),
             audience=audience,
-            jwks=jwks_cache_for(request, domain),
+            jwks=await jwks_cache_for(request, domain),
         )
     except AuthNotConfigured:
         raise HTTPException(

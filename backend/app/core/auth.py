@@ -121,7 +121,7 @@ async def fetch_jwks(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
     """GET one JWKS document. Network and document failures are ``AuthUnavailable``."""
     _assert_jwks_url(url)
     try:
-        response = await client.get(url)
+        response = await client.get(url, follow_redirects=False)
     except httpx.HTTPError as exc:
         logger.warning("Auth0 JWKS request failed")
         raise AuthUnavailable from exc
@@ -152,7 +152,8 @@ class JwksCache:
 
     During the cooldown the last refresh outcome is preserved: a successful
     document that lacked the ``kid`` stays ``AuthRejected`` (401), and a failed
-    refresh stays ``AuthUnavailable`` (503).
+    refresh stays ``AuthUnavailable`` (503) unless that ``kid`` was already
+    cached — then the stale key is reused.
     """
 
     def __init__(
@@ -189,17 +190,20 @@ class JwksCache:
             )
             if cooling:
                 if self._last_fetch_failed:
-                    raise AuthUnavailable
+                    return self._stale_or_unavailable(kid)
                 raise AuthRejected
             try:
                 keys = await self._fetch()
             except AuthUnavailable:
                 self._mark_failed()
-                raise
+                return self._stale_or_unavailable(kid)
             except Exception as exc:
                 logger.warning("Auth0 JWKS refresh failed")
                 self._mark_failed()
-                raise AuthUnavailable from exc
+                try:
+                    return self._stale_or_unavailable(kid)
+                except AuthUnavailable:
+                    raise AuthUnavailable from exc
             self._keys = keys
             self._fetched_at = self._clock()
             self._last_fetch_failed = False
@@ -209,9 +213,15 @@ class JwksCache:
             return key
 
     def _mark_failed(self) -> None:
+        """Record a failed refresh. Keep existing keys for stale fallback."""
         self._fetched_at = self._clock()
         self._last_fetch_failed = True
-        self._keys = {}
+
+    def _stale_or_unavailable(self, kid: str) -> Any:
+        key = self._keys.get(kid)
+        if key is not None:
+            return key
+        raise AuthUnavailable
 
 
 def _unverified_header(token: str) -> dict[str, Any]:
