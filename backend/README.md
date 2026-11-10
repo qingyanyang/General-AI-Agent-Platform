@@ -115,7 +115,7 @@ Once the stream has started, graph and model failures are `error` events. Discon
 | `done` | Authoritative final assistant message: `{ "role": "assistant", "content" }`. |
 | `error` | Recursion limit or unexpected execution failure (`message`). No `done` follows. |
 
-`last_activity_at` is updated after the graph succeeds and before `done`, in its own database session. A timestamp failure is rolled back and logged; `done` is still sent. A cancelled run does not update activity. Checkpoint rows LangGraph already wrote are left as they are.
+`last_activity_at` is updated after the graph succeeds and before `done`, in its own database session. A timestamp failure is rolled back and logged; `done` is still sent. A cancelled run does not update activity. If the model had already requested a tool, each unfinished call is recorded as `Tool execution cancelled` so the next turn stays valid. Other checkpoint rows already written are left as they are.
 
 ```bash
 curl -N http://localhost:8000/sessions/<session-uuid>/messages/stream \

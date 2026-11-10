@@ -14,14 +14,15 @@ import httpx
 import pytest
 import uvicorn
 from app.agents.graph import build_agent_graph
-from app.agents.runtime import run_agent, stream_agent
+from app.agents.runtime import StreamOutcome, run_agent, stream_agent
+from app.agents.tools.registry import ToolRegistry
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.main import app
 from app.services.chat_sessions import touch_last_activity
 from fastapi.testclient import TestClient
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import PrivateAttr
@@ -377,6 +378,97 @@ def test_cancel_producer_task_propagates_without_error_event() -> None:
     asyncio.run(scenario())
     assert model._cancelled.is_set()
     assert not any(event.type == "error" for event in events)
+
+
+class _RecordingChatModel(ScriptedChatModel):
+    """Records each model input so a later turn can be checked for tool calls."""
+
+    _seen: list[list[BaseMessage]] = PrivateAttr(default_factory=list)
+
+    def _stream(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ANN001
+        self._seen.append(list(messages))
+        return super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
+def _unanswered_tool_call_ids(messages: list[BaseMessage]) -> list[str]:
+    answered = {
+        message.tool_call_id
+        for message in messages
+        if isinstance(message, ToolMessage) and message.tool_call_id
+    }
+    missing: list[str] = []
+    for message in messages:
+        if not isinstance(message, AIMessage):
+            continue
+        for tool_call in message.tool_calls:
+            call_id = str(tool_call.get("id") or "")
+            if call_id not in answered:
+                missing.append(call_id)
+    return missing
+
+
+def test_cancel_during_tool_execution_keeps_next_turn_valid(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.agents.runtime.get_settings", _settings_with_key)
+    entered = asyncio.Event()
+
+    async def _block_until_cancelled(self, name: str, args: dict) -> None:  # noqa: ANN001
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ToolRegistry, "aexecute", _block_until_cancelled)
+    model = _RecordingChatModel(
+        script=[
+            _tool_call_message(content="Let me add."),
+            AIMessage(content="Next reply"),
+        ]
+    )
+    saver = InMemorySaver()
+    first_events: list = []
+
+    async def scenario() -> None:
+        async def producer() -> None:
+            async for event in stream_agent(
+                "2+3",
+                llm=model,
+                checkpointer=saver,
+                thread_id="thread-1",
+            ):
+                first_events.append(event)
+
+        task = asyncio.create_task(producer())
+        assert await asyncio.wait_for(entered.wait(), timeout=3)
+        task.cancel()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        outcome = StreamOutcome()
+        async for _event in stream_agent(
+            "next question",
+            llm=model,
+            checkpointer=saver,
+            thread_id="thread-1",
+            outcome=outcome,
+        ):
+            pass
+        assert outcome.failed is False
+        assert outcome.message is not None
+        assert outcome.message.content == "Next reply"
+
+    asyncio.run(scenario())
+    assert not any(event.type == "error" for event in first_events)
+    assert any(event.type == "tool.start" for event in first_events)
+    assert model._seen
+    follow_up = model._seen[-1]
+    assert _unanswered_tool_call_ids(follow_up) == []
+    assert any(
+        isinstance(message, ToolMessage)
+        and message.tool_call_id == "call_add_1"
+        and message.content == "Tool execution cancelled"
+        for message in follow_up
+    )
 
 
 def test_http_disconnect_cancels_producer(

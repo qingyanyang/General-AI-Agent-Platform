@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 _RECURSION_MESSAGE = "Agent stopped: recursion limit exceeded (possible tool-calling loop)"
 _EXECUTION_FAILED_MESSAGE = "Agent execution failed"
+_CANCELLED_TOOL_CONTENT = "Tool execution cancelled"
 
 
 def ensure_llm_configured() -> None:
@@ -235,6 +236,102 @@ def _events_from_stream_item(
                     )
 
 
+def _unanswered_tool_calls(messages: list[BaseMessage]) -> list[tuple[str, str]]:
+    """Tool calls with no matching ``ToolMessage``, as ``(name, tool_call_id)``."""
+    answered = {
+        message.tool_call_id
+        for message in messages
+        if isinstance(message, ToolMessage) and message.tool_call_id
+    }
+    pending: list[tuple[str, str]] = []
+    for message in messages:
+        if not isinstance(message, AIMessage):
+            continue
+        for tool_call in message.tool_calls:
+            call_id = _tool_call_id(tool_call)
+            if call_id in answered:
+                continue
+            pending.append((_tool_call_name(tool_call), call_id))
+            answered.add(call_id)
+    return pending
+
+
+async def _append_cancelled_tool_messages(graph: Any, config: dict[str, Any]) -> None:
+    """Record a result for tool calls left open by a cancelled run.
+
+    Chat Completions rejects a later turn whose history has an assistant
+    ``tool_calls`` message without a tool result for every id.
+    """
+    snapshot = await graph.aget_state(config)
+    messages = snapshot.values.get("messages") or []
+    pending = _unanswered_tool_calls(messages)
+    if not pending:
+        return
+    await graph.aupdate_state(
+        config,
+        {
+            "messages": [
+                ToolMessage(
+                    content=_CANCELLED_TOOL_CONTENT,
+                    tool_call_id=call_id,
+                    name=name,
+                )
+                for name, call_id in pending
+            ]
+        },
+        as_node="tools",
+    )
+
+
+async def _await_despite_cancellation(awaitable: Awaitable[None]) -> None:
+    """Run ``awaitable`` to completion when this task is already cancelled.
+
+    A second ``cancel()`` must not abandon the shielded task. Pending
+    cancellation is cleared only so this wait can finish; the caller still
+    propagates ``CancelledError``.
+    """
+    task = asyncio.ensure_future(awaitable)
+    current = asyncio.current_task()
+    while not task.done():
+        if current is not None:
+            while current.uncancel():
+                pass
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    error = task.exception()
+    if error is not None:
+        raise error
+
+
+async def _stop_stream(
+    inflight: set[asyncio.Task[Any]],
+    graph_iter: AsyncIterator[Any] | None,
+    graph: Any | None,
+    config: dict[str, Any] | None,
+    *,
+    repair_tool_calls: bool,
+) -> None:
+    for task in list(inflight):
+        if not task.done():
+            task.cancel()
+    if inflight:
+        await asyncio.gather(*inflight, return_exceptions=True)
+    if graph_iter is not None:
+        try:
+            await graph_iter.aclose()
+        except Exception:  # noqa: BLE001 — close failure must not hide a successful run
+            if not repair_tool_calls:
+                raise
+            logger.exception("Failed to close graph stream after cancellation")
+    if repair_tool_calls and graph is not None and config is not None:
+        try:
+            await _append_cancelled_tool_messages(graph, config)
+        except Exception:  # noqa: BLE001 — cancellation must still propagate
+            logger.exception("Failed to record cancelled tool calls")
+
+
 async def stream_agent(
     message: str,
     *,
@@ -248,7 +345,9 @@ async def stream_agent(
     Yields ``message.delta``, ``tool.start``, and ``tool.end``. On success the
     authoritative reply is stored on ``outcome`` and ``done`` is left to the
     caller. Failures yield ``error``. ``CancelledError`` closes the graph
-    iterator and propagates without an error event.
+    iterator and propagates without an error event. A cancel that leaves a
+    tool call without a result writes ``Tool execution cancelled`` for each
+    pending id so the next turn stays valid.
 
     The caller must own this generator. Closing it from a second task while it
     is running is not supported; cancel the task that is iterating it.
@@ -268,6 +367,9 @@ async def stream_agent(
     collected: list[BaseMessage] = []
     deltas: dict[str, str] = {}
     graph_iter: AsyncIterator[Any] | None = None
+    graph: Any | None = None
+    config: dict[str, Any] | None = None
+    repair_tool_calls = False
     inflight: set[asyncio.Task[Any]] = set()
     inflight_token = inflight_node_tasks.set(inflight)
     try:
@@ -303,6 +405,7 @@ async def stream_agent(
             content=extract_assistant_reply(collected),
         )
     except asyncio.CancelledError:
+        repair_tool_calls = use_checkpointer
         raise
     except AgentNotConfiguredError as exc:
         outcome.failed = True
@@ -318,11 +421,15 @@ async def stream_agent(
             message=_EXECUTION_FAILED_MESSAGE,
         )
     finally:
-        for task in inflight:
-            if not task.done():
-                task.cancel()
-        if inflight:
-            await asyncio.gather(*inflight, return_exceptions=True)
-        if graph_iter is not None:
-            await graph_iter.aclose()
-        inflight_node_tasks.reset(inflight_token)
+        try:
+            await _await_despite_cancellation(
+                _stop_stream(
+                    inflight,
+                    graph_iter,
+                    graph,
+                    config,
+                    repair_tool_calls=repair_tool_calls,
+                )
+            )
+        finally:
+            inflight_node_tasks.reset(inflight_token)
