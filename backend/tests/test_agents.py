@@ -11,7 +11,9 @@ from app.core.config import Settings, get_settings
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
+from sqlalchemy.orm import Session
 
+from tests.chat_helpers import seed_agent_grant
 from tests.fakes import ScriptedChatModel
 
 
@@ -119,7 +121,13 @@ def _agent_headers() -> dict[str, str]:
     return {"X-User-Id": "test-user"}
 
 
-def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) -> None:
+def test_agents_run_api_success(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    seed_agent_grant(db_session, "test-user")
+
     async def fake_run(message: str, *, llm=None) -> AgentResult:
         return AgentResult(
             reply="ok",
@@ -132,7 +140,7 @@ def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post(
+    response = api_client.post(
         "/agents/run",
         json={"message": "hello"},
         headers=_agent_headers(),
@@ -147,12 +155,14 @@ def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) ->
 
 
 def test_agents_run_api_missing_key_returns_503(
-    client: TestClient,
+    api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    seed_agent_grant(db_session, "test-user", can_view=False, can_execute=True)
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_llm_keys)
 
-    response = client.post(
+    response = api_client.post(
         "/agents/run",
         json={"message": "hello"},
         headers=_agent_headers(),
@@ -163,15 +173,18 @@ def test_agents_run_api_missing_key_returns_503(
 
 
 def test_agents_run_api_execution_error_returns_502(
-    client: TestClient,
+    api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    seed_agent_grant(db_session, "test-user", can_view=False, can_execute=True)
+
     async def fake_run(message: str, *, llm=None) -> AgentResult:
         raise AgentExecutionError("upstream failed")
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post(
+    response = api_client.post(
         "/agents/run",
         json={"message": "hello"},
         headers=_agent_headers(),
@@ -182,9 +195,12 @@ def test_agents_run_api_execution_error_returns_502(
 
 
 def test_agents_run_api_execution_error_includes_execution_id(
-    client: TestClient,
+    api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    seed_agent_grant(db_session, "test-user", can_view=False, can_execute=True)
+
     async def fake_run(message: str, *, llm=None) -> AgentResult:
         raise AgentExecutionError(
             "upstream failed",
@@ -193,7 +209,7 @@ def test_agents_run_api_execution_error_includes_execution_id(
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post(
+    response = api_client.post(
         "/agents/run",
         json={"message": "hello"},
         headers=_agent_headers(),
@@ -204,3 +220,29 @@ def test_agents_run_api_execution_error_includes_execution_id(
         "message": "upstream failed",
         "execution_id": "11111111-1111-4111-8111-111111111111",
     }
+
+
+def test_agents_run_without_grant_returns_403(
+    api_client: TestClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_run(message: str, *, llm=None) -> AgentResult:
+        nonlocal called
+        called = True
+        return AgentResult(
+            reply="ok",
+            execution_id="11111111-1111-4111-8111-111111111111",
+            messages=[],
+        )
+
+    monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
+    response = api_client.post(
+        "/agents/run",
+        json={"message": "hello"},
+        headers=_agent_headers(),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent access denied"
+    assert called is False

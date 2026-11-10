@@ -14,6 +14,7 @@ from app.schemas.chat_message import MESSAGE_CONTENT_MAX_LENGTH, ChatMessageOut
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from pytest import MonkeyPatch
+from sqlalchemy.orm import Session
 
 from tests.chat_helpers import OTHER
 from tests.chat_helpers import create_session as _create_session
@@ -44,8 +45,8 @@ def test_message_role_and_content_normalization() -> None:
     assert message_content_text(_Weird()) == ""  # type: ignore[arg-type]
 
 
-def test_post_missing_user_header_returns_422(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_post_missing_user_header_returns_422(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     response = api_client.post(
         f"/sessions/{created['id']}/messages",
@@ -54,8 +55,8 @@ def test_post_missing_user_header_returns_422(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_post_blank_content_returns_422(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_post_blank_content_returns_422(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     response = api_client.post(
         f"/sessions/{created['id']}/messages",
@@ -65,8 +66,8 @@ def test_post_blank_content_returns_422(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_post_oversized_content_returns_422(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_post_oversized_content_returns_422(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     response = api_client.post(
         f"/sessions/{created['id']}/messages",
@@ -78,9 +79,10 @@ def test_post_oversized_content_returns_422(api_client: TestClient) -> None:
 
 def test_post_preserves_internal_formatting(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     captured: dict = {}
 
@@ -102,8 +104,8 @@ def test_post_preserves_internal_formatting(
     assert captured["content"] == body
 
 
-def test_post_without_checkpointer_returns_503(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_post_without_checkpointer_returns_503(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     api_client.app.state.checkpointer = None
     response = api_client.post(
         f"/sessions/{created['id']}/messages",
@@ -114,8 +116,8 @@ def test_post_without_checkpointer_returns_503(api_client: TestClient) -> None:
     assert "persistence" in response.json()["detail"].lower()
 
 
-def test_get_without_checkpointer_returns_503(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_get_without_checkpointer_returns_503(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     api_client.app.state.checkpointer = None
     response = api_client.get(
         f"/sessions/{created['id']}/messages",
@@ -124,8 +126,8 @@ def test_get_without_checkpointer_returns_503(api_client: TestClient) -> None:
     assert response.status_code == 503
 
 
-def test_post_other_user_returns_404(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_post_other_user_returns_404(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     response = api_client.post(
         f"/sessions/{created['id']}/messages",
@@ -135,8 +137,8 @@ def test_post_other_user_returns_404(api_client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_get_archived_returns_404(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_get_archived_returns_404(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     api_client.delete(f"/sessions/{created['id']}", headers=_headers())
     response = api_client.get(
@@ -155,8 +157,8 @@ def test_get_unknown_session_returns_404(api_client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_get_empty_history(api_client: TestClient) -> None:
-    created = _create_session(api_client)
+def test_get_empty_history(api_client: TestClient, db_session: Session) -> None:
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     response = api_client.get(
         f"/sessions/{created['id']}/messages",
@@ -168,9 +170,10 @@ def test_get_empty_history(api_client: TestClient) -> None:
 
 def test_get_history_without_llm_api_key(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     saver = _with_saver(api_client)
     thread_id = created["id"]
     llm = ScriptedChatModel(script=[AIMessage(content="seeded")])
@@ -200,9 +203,10 @@ def test_get_history_without_llm_api_key(
 
 def test_multi_turn_post_and_get(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     saver = _with_saver(api_client)
     llm = ScriptedChatModel(
         script=[
@@ -246,9 +250,10 @@ def test_multi_turn_post_and_get(
 
 def test_checkpoint_residue_after_failed_run(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     saver = _with_saver(api_client)
 
     class Boom(ScriptedChatModel):
@@ -280,9 +285,10 @@ def test_checkpoint_residue_after_failed_run(
 
 def test_post_bumps_last_activity(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
     before = datetime.fromisoformat(created["last_activity_at"])
 
@@ -311,9 +317,10 @@ def test_post_bumps_last_activity(
 
 def test_touch_failure_still_returns_200(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
 
     async def fake_post(**kwargs):
@@ -343,9 +350,10 @@ def test_touch_failure_still_returns_200(
 
 def test_post_missing_llm_after_ownership_returns_503(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
 
     async def raise_not_configured(**kwargs):
@@ -366,9 +374,10 @@ def test_post_missing_llm_after_ownership_returns_503(
 
 def test_post_execution_error_returns_502(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = _create_session(api_client)
+    created = _create_session(api_client, db_session)
     _with_saver(api_client)
 
     async def raise_exec(**kwargs):

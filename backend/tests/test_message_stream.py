@@ -27,7 +27,7 @@ from langchain_core.outputs import ChatGenerationChunk
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import PrivateAttr
 from pytest import MonkeyPatch
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from tests.chat_helpers import OTHER, USER, create_session, headers, with_saver
 from tests.fakes import ScriptedChatModel
@@ -159,9 +159,10 @@ def test_streamed_chunks_merge_text_and_tool_arguments() -> None:
 
 def test_no_tool_deltas_match_final_reply(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     before = created["last_activity_at"]
     _use_model(monkeypatch, ScriptedChatModel(script=[AIMessage(content="Hello!")]))
@@ -182,9 +183,10 @@ def test_no_tool_deltas_match_final_reply(
 
 def test_tool_deltas_are_not_the_final_reply(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     _use_model(
         monkeypatch,
@@ -219,9 +221,10 @@ def test_tool_deltas_are_not_the_final_reply(
 
 def test_graph_failure_emits_error_without_done(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
 
     class Boom(ScriptedChatModel):
@@ -237,8 +240,10 @@ def test_graph_failure_emits_error_without_done(
     assert events[0]["execution_id"]
 
 
-def test_validation_precedes_missing_checkpointer(api_client: TestClient) -> None:
-    created = create_session(api_client)
+def test_validation_precedes_missing_checkpointer(
+    api_client: TestClient, db_session: Session
+) -> None:
+    created = create_session(api_client, db_session)
     api_client.app.state.checkpointer = None
     missing_header = api_client.post(
         f"/sessions/{created['id']}/messages/stream",
@@ -266,9 +271,10 @@ def test_missing_checkpointer_returns_503_before_ownership(api_client: TestClien
 
 def test_other_user_returns_404_before_llm_check(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_key)
     response = api_client.post(
@@ -281,9 +287,10 @@ def test_other_user_returns_404_before_llm_check(
 
 def test_missing_llm_after_ownership_returns_503(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_key)
     response = api_client.post(
@@ -297,9 +304,10 @@ def test_missing_llm_after_ownership_returns_503(
 
 def test_activity_is_updated_before_done(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     _use_model(monkeypatch, ScriptedChatModel(script=[AIMessage(content="Hello!")]))
     started = threading.Event()
@@ -340,9 +348,10 @@ def test_activity_is_updated_before_done(
 
 def test_activity_failure_still_emits_done(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client)
+    created = create_session(api_client, db_session)
     with_saver(api_client)
     _use_model(monkeypatch, ScriptedChatModel(script=[AIMessage(content="Hello!")]))
 
@@ -494,6 +503,13 @@ def test_http_disconnect_cancels_producer(
     from app.api.deps import get_current_user
 
     from tests.auth_helpers import stub_get_current_user
+    from tests.chat_helpers import seed_agent_grant
+
+    seed_session = factory()
+    try:
+        seed_agent_grant(seed_session, USER)
+    finally:
+        seed_session.close()
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = stub_get_current_user

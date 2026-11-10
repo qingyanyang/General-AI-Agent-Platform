@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from app.models.agent_access_grant import AgentAccessGrant
 from app.models.chat_session import ChatSession
 from app.schemas.chat_session import DEFAULT_SESSION_TITLE
 
@@ -96,8 +97,24 @@ def list_sessions(
     user_id: str,
     limit: int,
     cursor: str | None,
+    require_view_grant: bool = True,
 ) -> SessionPage:
-    stmt = _active_owned_query(user_id).order_by(
+    """List active owned sessions.
+
+    When ``require_view_grant`` is true (default), only sessions whose ``agent_id``
+    the user can view are included. The filter is applied in SQL before limit/cursor.
+    """
+    stmt = _active_owned_query(user_id)
+    if require_view_grant:
+        stmt = stmt.where(
+            ChatSession.agent_id.in_(
+                select(AgentAccessGrant.agent_id).where(
+                    AgentAccessGrant.user_id == user_id,
+                    AgentAccessGrant.can_view.is_(True),
+                ),
+            ),
+        )
+    stmt = stmt.order_by(
         ChatSession.last_activity_at.desc(),
         ChatSession.id.desc(),
     )
