@@ -7,6 +7,7 @@ from collections.abc import Generator
 
 import pytest
 from app.agents.graph import clear_agent_graph_cache
+from app.api.deps import get_current_user_id
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.main import app
@@ -16,6 +17,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from tests.auth_helpers import stub_get_current_user_id
 
 
 @pytest.fixture(autouse=True)
@@ -30,8 +33,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]
     """HTTP client with checkpointer disabled (no DATABASE_URL for unit tests)."""
     monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
+    app.dependency_overrides[get_current_user_id] = stub_get_current_user_id
     with TestClient(app) as test_client:
         yield test_client
+    app.dependency_overrides.clear()
     get_settings.cache_clear()
 
 
@@ -84,6 +89,7 @@ def api_client(
     monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user_id] = stub_get_current_user_id
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -115,6 +115,10 @@ def test_agent_requires_api_key_when_no_llm_injected(
         asyncio.run(run_agent("hi"))
 
 
+def _agent_headers() -> dict[str, str]:
+    return {"X-User-Id": "test-user"}
+
+
 def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) -> None:
     async def fake_run(message: str, *, llm=None) -> AgentResult:
         return AgentResult(
@@ -128,7 +132,11 @@ def test_agents_run_api_success(client: TestClient, monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post("/agents/run", json={"message": "hello"})
+    response = client.post(
+        "/agents/run",
+        json={"message": "hello"},
+        headers=_agent_headers(),
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -144,7 +152,11 @@ def test_agents_run_api_missing_key_returns_503(
 ) -> None:
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_llm_keys)
 
-    response = client.post("/agents/run", json={"message": "hello"})
+    response = client.post(
+        "/agents/run",
+        json={"message": "hello"},
+        headers=_agent_headers(),
+    )
 
     assert response.status_code == 503
     assert "API key" in response.json()["detail"]
@@ -159,7 +171,11 @@ def test_agents_run_api_execution_error_returns_502(
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post("/agents/run", json={"message": "hello"})
+    response = client.post(
+        "/agents/run",
+        json={"message": "hello"},
+        headers=_agent_headers(),
+    )
 
     assert response.status_code == 502
     assert response.json()["detail"] == "upstream failed"
@@ -177,7 +193,11 @@ def test_agents_run_api_execution_error_includes_execution_id(
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
 
-    response = client.post("/agents/run", json={"message": "hello"})
+    response = client.post(
+        "/agents/run",
+        json={"message": "hello"},
+        headers=_agent_headers(),
+    )
 
     assert response.status_code == 502
     assert response.json()["detail"] == {

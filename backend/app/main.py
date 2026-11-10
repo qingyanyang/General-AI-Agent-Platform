@@ -1,10 +1,13 @@
+import asyncio
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.checkpointer import checkpointer_lifespan
 from app.api.router import api_router
+from app.core.auth import AUTH_HTTP_TIMEOUT
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -15,10 +18,20 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    async with checkpointer_lifespan(settings) as (pool, checkpointer):
-        app.state.checkpoint_pool = pool
-        app.state.checkpointer = checkpointer
-        yield
+    async with httpx.AsyncClient(
+        timeout=AUTH_HTTP_TIMEOUT,
+        follow_redirects=False,
+    ) as auth_http_client:
+        app.state.auth_http_client = auth_http_client
+        app.state.jwks_cache = None
+        app.state.jwks_cache_lock = asyncio.Lock()
+        async with checkpointer_lifespan(settings) as (pool, checkpointer):
+            app.state.checkpoint_pool = pool
+            app.state.checkpointer = checkpointer
+            yield
+        app.state.jwks_cache = None
+        app.state.jwks_cache_lock = None
+        app.state.auth_http_client = None
 
 
 _settings = get_settings()

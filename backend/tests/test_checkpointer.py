@@ -128,13 +128,25 @@ def test_only_new_human_message_is_passed_each_turn(monkeypatch: MonkeyPatch) ->
     assert captured[1][0].content == "second"
 
 
-def test_agents_run_session_without_checkpointer_returns_503_before_auth(
+def test_agents_run_session_without_credentials_returns_401(
     api_client: TestClient,
 ) -> None:
-    """503 when persistence unavailable — even without X-User-Id."""
+    """Authentication runs before the checkpointer availability check."""
     response = api_client.post(
         "/agents/run",
         json={"message": "hello", "session_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 422
+
+
+def test_agents_run_session_without_checkpointer_returns_503_after_auth(
+    api_client: TestClient,
+) -> None:
+    """With identity present, a missing checkpointer still returns 503."""
+    response = api_client.post(
+        "/agents/run",
+        json={"message": "hello", "session_id": str(uuid.uuid4())},
+        headers={"X-User-Id": "owner"},
     )
     assert response.status_code == 503
     assert "persistence" in response.json()["detail"].lower()

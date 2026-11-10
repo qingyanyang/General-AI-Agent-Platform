@@ -6,7 +6,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -52,20 +52,18 @@ def _db_session(request: Request) -> Session:
 async def agents_run(
     body: AgentRunRequest,
     request: Request,
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> AgentRunResponse:
     try:
         if body.session_id is None:
             result = await run_agent(body.message)
         else:
-            # Persistence must be available before identity / ownership queries.
             checkpointer = getattr(request.app.state, "checkpointer", None)
             if checkpointer is None:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Conversation persistence is not configured",
                 )
-            user_id = get_current_user_id(x_user_id)
             with _db_session(request) as db:
                 chat_session = session_service.get_active_session_for_user(
                     db,
