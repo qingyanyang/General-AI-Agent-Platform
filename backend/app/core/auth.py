@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -24,6 +25,15 @@ USER_ID_MAX_LENGTH = 512
 JWKS_CACHE_TTL_SECONDS = 600.0
 JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
 AUTH_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=2.0)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedUser:
+    """Caller identity from a validated Auth0 API access token."""
+
+    user_id: str
+    permissions: frozenset[str]
+
 
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)"
@@ -234,14 +244,31 @@ def _unverified_header(token: str) -> dict[str, Any]:
     return header
 
 
+def parse_permissions_claim(raw: Any) -> frozenset[str]:
+    """Return permissions from the Auth0 ``permissions`` claim.
+
+    Only a JSON array of non-empty strings is accepted. Missing claims, wrong
+    types, null, or **any** invalid element yield an empty set (fail closed).
+    Values are kept exactly as issued — no trim or normalization.
+    """
+    if not isinstance(raw, list):
+        return frozenset()
+    permissions: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            return frozenset()
+        permissions.add(item)
+    return frozenset(permissions)
+
+
 async def verify_access_token(
     token: str,
     *,
     issuer: str,
     audience: str,
     jwks: JwksCache,
-) -> str:
-    """Validate one access token and return its subject.
+) -> AuthenticatedUser:
+    """Validate one access token and return identity plus permissions.
 
     Missing ``kid`` and algorithms other than RS256 fail before any JWKS fetch.
     """
@@ -269,4 +296,7 @@ async def verify_access_token(
         or len(subject) > USER_ID_MAX_LENGTH
     ):
         raise AuthRejected
-    return subject
+    return AuthenticatedUser(
+        user_id=subject,
+        permissions=parse_permissions_claim(claims.get("permissions")),
+    )

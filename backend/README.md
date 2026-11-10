@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#15).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#16).
 
 ## Layout
 
@@ -72,6 +72,42 @@ curl -s http://localhost:8000/sessions \
 ```
 
 Backend verification does not use a client secret.
+
+### Roles and permissions (#16)
+
+Auth0 RBAC puts API permissions on the access token (`permissions` claim). The API authorizes by **exact** permission strings only (no trim/normalize). Roles are assigned in the Auth0 Dashboard; the backend does not trust a roles claim.
+
+| Permission | Meaning |
+| --- | --- |
+| `agents:read` | List/get sessions and message history |
+| `agents:execute` | Create/archive sessions, post/stream messages, `POST /agents/run` |
+| `agents:configure` | Reserved for agent configuration APIs (not wired yet) |
+| `agent-access:manage` | Reserved for per-agent access grants (#17; not wired yet) |
+
+| Role | Permissions |
+| --- | --- |
+| Admin | all four |
+| Agent Developer | `agents:read`, `agents:configure`, `agents:execute` |
+| Agent User | `agents:read`, `agents:execute` |
+
+Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership or future per-agent grants.
+
+#### Auth0 Dashboard setup
+
+1. On **EAP API**, enable **RBAC** and **Add Permissions in the Access Token**.
+2. Create the four permissions above (names must match exactly).
+3. Create roles **Admin**, **Agent Developer**, and **Agent User** with the matrix.
+4. Assign a role to the user in the Dashboard (no Management API in this milestone).
+5. **Manual check:** after assigning a role, obtain a **new** PKCE access token and call a protected route. Mocked tokens cannot prove Dashboard wiring.
+
+```bash
+# After assigning Agent User and getting a fresh access token:
+curl -s http://localhost:8000/sessions \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"agent_id":"default"}'
+# Expect 201 when the token includes agents:execute; 403 otherwise.
+```
 
 ### Chat sessions (#11)
 

@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import run_agent
-from app.api.deps import get_current_user_id
+from app.api.deps import require_permissions
+from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
+from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.services import chat_sessions as session_service
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -52,7 +54,7 @@ def _db_session(request: Request) -> Session:
 async def agents_run(
     body: AgentRunRequest,
     request: Request,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
 ) -> AgentRunResponse:
     try:
         if body.session_id is None:
@@ -67,7 +69,7 @@ async def agents_run(
             with _db_session(request) as db:
                 chat_session = session_service.get_active_session_for_user(
                     db,
-                    user_id=user_id,
+                    user_id=user.user_id,
                     session_id=body.session_id,
                 )
                 thread_id = thread_id_for_session(chat_session.id)

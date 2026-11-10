@@ -491,12 +491,12 @@ def test_http_disconnect_cancels_producer(
         finally:
             session.close()
 
-    from app.api.deps import get_current_user_id
+    from app.api.deps import get_current_user
 
-    from tests.auth_helpers import stub_get_current_user_id
+    from tests.auth_helpers import stub_get_current_user
 
     app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[get_current_user_id] = stub_get_current_user_id
+    app.dependency_overrides[get_current_user] = stub_get_current_user
     config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
