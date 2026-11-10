@@ -33,12 +33,40 @@ from app.schemas.chat_session import (
     ChatSessionListOut,
     ChatSessionOut,
 )
+from app.services import agent_access as access_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+_AGENT_ACCESS_DENIED = "Agent access denied"
+
+
+def _deny_agent_access() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=_AGENT_ACCESS_DENIED,
+    )
+
+
+def _ensure_capability(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    capability: access_service.AgentCapability,
+) -> None:
+    try:
+        access_service.ensure_agent_capability(
+            db,
+            user_id=user_id,
+            agent_id=agent_id,
+            capability=capability,
+        )
+    except access_service.AgentAccessDenied as exc:
+        raise _deny_agent_access() from exc
 
 
 @contextmanager
@@ -59,6 +87,12 @@ def create_session(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
+    _ensure_capability(
+        db,
+        user_id=user.user_id,
+        agent_id=body.agent_id,
+        capability=access_service.AgentCapability.EXECUTE,
+    )
     session = session_service.create_session(
         db,
         user_id=user.user_id,
@@ -80,6 +114,7 @@ def list_sessions(
         user_id=user.user_id,
         limit=limit,
         cursor=cursor,
+        require_view_grant=True,
     )
     return ChatSessionListOut(
         items=[ChatSessionOut.model_validate(item) for item in page.items],
@@ -98,6 +133,12 @@ def get_session(
         user_id=user.user_id,
         session_id=session_id,
     )
+    _ensure_capability(
+        db,
+        user_id=user.user_id,
+        agent_id=session.agent_id,
+        capability=access_service.AgentCapability.VIEW,
+    )
     return ChatSessionOut.model_validate(session)
 
 
@@ -107,6 +148,7 @@ def delete_session(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
+    # Ownership only — no agent grant required (idempotent archive for owners).
     session_service.archive_session(db, user_id=user.user_id, session_id=session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -152,6 +194,12 @@ async def list_messages(
         user_id=user.user_id,
         session_id=session_id,
     )
+    _ensure_capability(
+        db,
+        user_id=user.user_id,
+        agent_id=chat_session.agent_id,
+        capability=access_service.AgentCapability.VIEW,
+    )
     items = await message_service.load_session_messages(
         checkpointer=checkpointer,
         thread_id=thread_id_for_session(chat_session.id),
@@ -167,12 +215,18 @@ async def create_message(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
 ) -> ChatMessageCreateResult:
     checkpointer = _require_checkpointer(request)
-    # Short-lived DB scope for ownership only — do not hold the connection across LLM work.
+    # Short-lived DB scope for ownership + grant — do not hold across LLM work.
     with _db_session(request) as db:
         chat_session = session_service.get_active_session_for_user(
             db,
             user_id=user.user_id,
             session_id=session_id,
+        )
+        _ensure_capability(
+            db,
+            user_id=user.user_id,
+            agent_id=chat_session.agent_id,
+            capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
 
@@ -197,6 +251,7 @@ async def create_message(
         ) from exc
 
     _touch_session_activity(request, owned_session_id)
+    # Execute-only responses already return only the current-turn assistant message.
     return ChatMessageCreateResult(execution_id=execution_id, message=message)
 
 
@@ -235,6 +290,12 @@ async def stream_message(
             db,
             user_id=user.user_id,
             session_id=session_id,
+        )
+        _ensure_capability(
+            db,
+            user_id=user.user_id,
+            agent_id=chat_session.agent_id,
+            capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
     try:
@@ -281,6 +342,7 @@ async def stream_message(
             await asyncio.sleep(0)
             if disconnected.is_set():
                 return
+            # SSE done payload is the current-turn assistant message only.
             yield format_sse(
                 StreamDone(execution_id=outcome.execution_id, message=outcome.message),
             )

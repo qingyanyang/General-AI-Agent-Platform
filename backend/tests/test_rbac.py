@@ -36,6 +36,7 @@ from tests.auth_helpers import (
     jwks_document,
     sign_access_token,
 )
+from tests.chat_helpers import seed_agent_grant
 
 
 @pytest.fixture
@@ -165,8 +166,10 @@ def test_execute_without_permission_is_403_not_401(
 
 def test_read_without_permission_is_403(
     rbac_client: tuple[TestClient, rsa.RSAPrivateKey],
+    db_session: Session,
 ) -> None:
     client, private_key = rbac_client
+    seed_agent_grant(db_session, "auth0|user-1", can_view=False, can_execute=True)
     token = _token(private_key, permissions=[PERM_AGENTS_EXECUTE])
     created = client.post(
         "/sessions",
@@ -180,8 +183,10 @@ def test_read_without_permission_is_403(
 
 def test_agent_user_can_read_and_execute(
     rbac_client: tuple[TestClient, rsa.RSAPrivateKey],
+    db_session: Session,
 ) -> None:
     client, private_key = rbac_client
+    seed_agent_grant(db_session, "auth0|user-1")
     token = _token(
         private_key,
         permissions=sorted(ROLE_PERMISSIONS["Agent User"]),
@@ -231,8 +236,11 @@ def test_require_permissions_requires_all() -> None:
 
 def test_admin_still_404_for_other_users_session(
     rbac_client: tuple[TestClient, rsa.RSAPrivateKey],
+    db_session: Session,
 ) -> None:
     client, private_key = rbac_client
+    seed_agent_grant(db_session, "auth0|owner")
+    seed_agent_grant(db_session, "auth0|admin")
     owner = bearer_headers(
         _token(
             private_key,
@@ -270,9 +278,11 @@ def test_configure_permission_unwired_but_enforced() -> None:
 
 def test_agents_run_requires_execute(
     rbac_client: tuple[TestClient, rsa.RSAPrivateKey],
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
     client, private_key = rbac_client
+    seed_agent_grant(db_session, "auth0|user-1")
 
     async def fake_run(message: str, **kwargs: Any) -> AgentResult:
         return AgentResult(

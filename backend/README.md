@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#16).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#17).
 
 ## Layout
 
@@ -82,7 +82,7 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 | `agents:read` | List/get sessions and message history |
 | `agents:execute` | Create/archive sessions, post/stream messages, `POST /agents/run` |
 | `agents:configure` | Reserved for agent configuration APIs (not wired yet) |
-| `agent-access:manage` | Reserved for per-agent access grants (#17; not wired yet) |
+| `agent-access:manage` | Grant / inspect / revoke per-user agent access (#17) |
 
 | Role | Permissions |
 | --- | --- |
@@ -90,7 +90,35 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 | Agent Developer | `agents:read`, `agents:configure`, `agents:execute` |
 | Agent User | `agents:read`, `agents:execute` |
 
-Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership or future per-agent grants.
+Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership or per-agent grants. **Admin has no implicit view/configure/execute** on agents — `agent-access:manage` only authorizes grant APIs.
+
+### Agent-level access (#17)
+
+In addition to platform permissions, callers need a per-user grant for the specific `agent_id` (Auth0 `sub` + agent id). Until Agent CRUD (#19), agent ids are free-form strings (same rules as session `agent_id`); isolation tests may use ids such as `reporting` / `finance` against the single configured graph.
+
+| Capability | Controls |
+| --- | --- |
+| `view` | Session list/get and message history |
+| `execute` | Create session, post/stream messages, `POST /agents/run` |
+| `configure` | Stored on grants; no HTTP routes yet |
+
+**Execute-only grants are allowed:** the user can create/send and receive the current-turn reply, but cannot list or retrieve history without `view`. JSON and SSE responses expose only the current run (not prior message objects). `/agents/run` without `view` returns `reply` plus a single current-turn assistant entry in `messages` — not the full checkpoint transcript.
+
+**Limitation:** execute-only access hides history endpoints and historical message objects in API responses, but the **model still receives saved checkpoint context** and may repeat prior content in a new reply. Response filtering cannot guarantee historical information remains inaccessible.
+
+**Archive:** owners may soft-delete sessions with platform `agents:execute` only (no agent grant). Idempotent for already-archived owned sessions.
+
+**Status codes (session-scoped):** unknown / archived / other-user → **404** first; owned session missing the required agent capability → **403** (`Agent access denied`). Session lists SQL-filter to viewable `agent_id`s before limit/cursor.
+
+**Admin grant API** (`agent-access:manage`):
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `PUT` | `/agent-access/grants` | Full replace upsert; all three booleans required; all-false deletes |
+| `GET` | `/agent-access/grants` | Optional `user_id` / `agent_id` filters, then `limit`/`cursor` pagination |
+| `DELETE` | `/agent-access/grants` | Query `user_id` + `agent_id`; 404 if missing |
+
+Revocation applies to subsequent requests only (cancelling in-flight runs is out of scope). Stateless `/agents/run` authorizes against `AGENT_ID` / `settings.agent_id` (default `default`).
 
 #### Auth0 Dashboard setup
 

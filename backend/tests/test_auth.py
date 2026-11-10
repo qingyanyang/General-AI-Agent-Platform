@@ -39,6 +39,7 @@ from tests.auth_helpers import (
     jwks_document,
     sign_access_token,
 )
+from tests.chat_helpers import seed_agent_grant
 from tests.fakes import ScriptedChatModel
 
 
@@ -167,8 +168,10 @@ def test_missing_bearer_returns_401_with_www_authenticate(
 
 def test_x_user_id_cannot_bypass_or_override_token(
     auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
 ) -> None:
     client, private_key, _jwk, _fetch_log = auth_api_client
+    seed_agent_grant(db_session, "auth0|token-user")
     token = _token(private_key, subject="auth0|token-user")
     response = client.post(
         "/sessions",
@@ -181,8 +184,10 @@ def test_x_user_id_cannot_bypass_or_override_token(
 
 def test_valid_token_creates_session_owned_by_sub(
     auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
 ) -> None:
     client, private_key, _jwk, fetch_log = auth_api_client
+    seed_agent_grant(db_session, "auth0|owner")
     token = _token(private_key, subject="auth0|owner")
     response = client.post(
         "/sessions",
@@ -201,8 +206,11 @@ def test_valid_token_creates_session_owned_by_sub(
 
 def test_other_user_cannot_access_session(
     auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
 ) -> None:
     client, private_key, _jwk, _fetch_log = auth_api_client
+    seed_agent_grant(db_session, "auth0|owner")
+    seed_agent_grant(db_session, "auth0|intruder")
     owner = client.post(
         "/sessions",
         json={"agent_id": "default"},
@@ -563,11 +571,13 @@ def test_jwks_rotation_refresh_after_cooldown() -> None:
 
 def test_protected_families_require_bearer_without_override(
     auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
     client, private_key, _jwk, _fetch_log = auth_api_client
     token = _token(private_key, subject="auth0|owner")
     headers = bearer_headers(token)
+    seed_agent_grant(db_session, "auth0|owner")
 
     created = client.post("/sessions", json={"agent_id": "default"}, headers=headers)
     assert created.status_code == 201

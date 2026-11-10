@@ -6,6 +6,9 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from tests.chat_helpers import seed_agent_grant
 
 USER_A = "user-a"
 USER_B = "user-b"
@@ -13,6 +16,10 @@ USER_B = "user-b"
 
 def _headers(user_id: str) -> dict[str, str]:
     return {"X-User-Id": user_id}
+
+
+def _grant(db: Session, user_id: str, agent_id: str = "default") -> None:
+    seed_agent_grant(db, user_id, agent_id)
 
 
 def test_missing_database_url_returns_503(
@@ -62,7 +69,11 @@ def test_oversized_user_header_returns_422(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_create_session_defaults_title(api_client: TestClient) -> None:
+def test_create_session_defaults_title(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
     response = api_client.post(
         "/sessions",
         json={"agent_id": "default"},
@@ -78,7 +89,11 @@ def test_create_session_defaults_title(api_client: TestClient) -> None:
     assert body["last_activity_at"]
 
 
-def test_create_session_custom_title(api_client: TestClient) -> None:
+def test_create_session_custom_title(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
     response = api_client.post(
         "/sessions",
         json={"agent_id": "default", "title": "  Takeoff  "},
@@ -106,7 +121,24 @@ def test_create_rejects_blank_agent_id(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_list_is_scoped_to_owner(api_client: TestClient) -> None:
+def test_create_without_grant_returns_403(
+    api_client: TestClient,
+) -> None:
+    response = api_client.post(
+        "/sessions",
+        json={"agent_id": "default"},
+        headers=_headers(USER_A),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent access denied"
+
+
+def test_list_is_scoped_to_owner(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
+    _grant(db_session, USER_B)
     api_client.post(
         "/sessions",
         json={"agent_id": "default", "title": "A"},
@@ -125,7 +157,11 @@ def test_list_is_scoped_to_owner(api_client: TestClient) -> None:
     assert body["next_cursor"] is None
 
 
-def test_get_other_users_session_returns_404(api_client: TestClient) -> None:
+def test_get_other_users_session_returns_404(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
     created = api_client.post(
         "/sessions",
         json={"agent_id": "default"},
@@ -138,7 +174,11 @@ def test_get_other_users_session_returns_404(api_client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_delete_other_users_session_returns_404(api_client: TestClient) -> None:
+def test_delete_other_users_session_returns_404(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
     created = api_client.post(
         "/sessions",
         json={"agent_id": "default"},
@@ -161,7 +201,9 @@ def test_delete_unknown_session_returns_404(api_client: TestClient) -> None:
 
 def test_archive_hides_from_get_and_list_and_is_idempotent(
     api_client: TestClient,
+    db_session: Session,
 ) -> None:
+    _grant(db_session, USER_A)
     created = api_client.post(
         "/sessions",
         json={"agent_id": "default", "title": "Soon gone"},
@@ -180,7 +222,11 @@ def test_archive_hides_from_get_and_list_and_is_idempotent(
     assert listed["items"] == []
 
 
-def test_pagination_cursor(api_client: TestClient) -> None:
+def test_pagination_cursor(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _grant(db_session, USER_A)
     for index in range(3):
         api_client.post(
             "/sessions",

@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from pytest import MonkeyPatch
+from sqlalchemy.orm import Session
 
+from tests.chat_helpers import seed_agent_grant
 from tests.fakes import ScriptedChatModel
 
 
@@ -154,11 +156,13 @@ def test_agents_run_session_without_checkpointer_returns_503_after_auth(
 
 def test_agents_run_session_other_user_returns_404(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
 
     api_client.app.state.checkpointer = InMemorySaver()
+    seed_agent_grant(db_session, "owner")
 
     async def fake_run(message: str, **kwargs):
         from app.agents.runtime import AgentMessageView, AgentResult
@@ -187,11 +191,13 @@ def test_agents_run_session_other_user_returns_404(
 
 def test_agents_run_session_archived_returns_404(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
 
     api_client.app.state.checkpointer = InMemorySaver()
+    seed_agent_grant(db_session, "owner")
 
     async def fake_run(message: str, **kwargs):
         from app.agents.runtime import AgentMessageView, AgentResult
@@ -221,11 +227,13 @@ def test_agents_run_session_archived_returns_404(
 
 def test_agents_run_owned_session_passes_derived_thread_id(
     api_client: TestClient,
+    db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
 
     api_client.app.state.checkpointer = InMemorySaver()
+    seed_agent_grant(db_session, "owner")
     captured: dict = {}
 
     async def fake_run(message: str, **kwargs):
