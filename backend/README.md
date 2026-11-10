@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#13).
+FastAPI foundation for the Enterprise AI Agent Platform (issues #7–#15).
 
 ## Layout
 
@@ -31,17 +31,47 @@ uvicorn app.main:app --reload --port 8000
 
 Health: `GET http://localhost:8000/health`
 
-### Identity stub (development only)
+### Authentication (#15)
 
-Protected session routes require header:
+Protected routes accept Auth0 **API access tokens** only:
 
 ```http
-X-User-Id: <opaque-non-empty-id>
+Authorization: Bearer <access_token>
 ```
 
-Max length 128. Missing, blank, or oversized values return **422**.
+| Variable | Example | Notes |
+| --- | --- | --- |
+| `AUTH0_DOMAIN` | `dev-pf7wi26tb5bj8qxz.us.auth0.com` | Hostname only (no scheme, path, or query) |
+| `AUTH0_AUDIENCE` | `https://api.agent-platform` | Auth0 API identifier |
 
-This is a temporary stand-in until **OIDC/JWT (#15)** replaces `get_current_user_id` in `app/api/deps.py` with a validated identity while keeping the same dependency signature.
+Validation uses RS256 against Auth0 JWKS (`https://{AUTH0_DOMAIN}/.well-known/jwks.json`), and requires issuer `https://{AUTH0_DOMAIN}/`, audience, expiry, and a non-empty `sub` (max 512 characters — stored as session `user_id`). ID tokens and tokens for other APIs are rejected. `X-User-Id` is ignored and cannot set identity.
+
+| Condition | Status |
+| --- | --- |
+| Missing / invalid / expired / wrong-issuer / wrong-audience / wrong-alg token | **401** with `WWW-Authenticate: Bearer` |
+| Auth0 settings missing or not a hostname | **503** |
+| JWKS cannot be retrieved when the signing key is not cached | **503** |
+
+`/health` stays public. Protected: `/agents/run` (including stateless), session CRUD, message JSON, and SSE streaming. Authentication runs before persistence checks, streaming, and agent execution.
+
+#### Manual token for local API calls
+
+`curl` is not the login flow. Obtain a user access token with **Authorization Code + PKCE** against the **EAP Web** SPA (`http://localhost:5173` callback), audience `https://api.agent-platform`, then call the API:
+
+1. In Auth0, authorize **EAP Web** for user-delegated access to **EAP API**.
+2. Complete the Auth0 SPA / PKCE login in a browser (or Auth0’s sample SPA) and copy the **access token** (not the ID token).
+3. Call the API with that token:
+
+```bash
+export ACCESS_TOKEN='...'   # Auth0 API access token for audience https://api.agent-platform
+
+curl -s http://localhost:8000/sessions \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"agent_id":"default"}'
+```
+
+Backend verification does not use a client secret.
 
 ### Chat sessions (#11)
 
@@ -58,7 +88,7 @@ Example:
 
 ```bash
 curl -s http://localhost:8000/sessions \
-  -H 'X-User-Id: demo-user-1' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"agent_id":"default"}'
 ```
@@ -76,12 +106,13 @@ Canonical multi-turn chat API. History is read from the LangGraph **checkpoint**
 
 **Validation:** `content` max **32_000** characters; whitespace-only rejected (**422**); leading/trailing trim only — internal newlines/spaces preserved.
 
-**Error precedence** (FastAPI `Depends` may return **422** for headers/body first):
+**Error precedence** (FastAPI `Depends` may return **422** for body first):
 
-1. Saver unavailable → **503** (POST and GET)
-2. Unknown / archived / other-user session → **404**
-3. LLM not configured → **503** (**POST only**; GET never checks LLM)
-4. Agent execution failure → **502** (POST only)
+1. Missing / invalid credentials → **401** (or Auth0 config / JWKS failure → **503**)
+2. Saver unavailable → **503** (POST and GET)
+3. Unknown / archived / other-user session → **404**
+4. LLM not configured → **503** (**POST only**; GET never checks LLM)
+5. Agent execution failure → **502** (POST only)
 
 **Failed runs:** A **502** does not mean nothing was saved. The checkpoint may already contain the new user message (and tool turns). Retrying the same POST may **duplicate** the user message in history.
 
@@ -89,21 +120,22 @@ Canonical multi-turn chat API. History is read from the LangGraph **checkpoint**
 
 ```bash
 curl -s http://localhost:8000/sessions/<session-uuid>/messages \
-  -H 'X-User-Id: demo-user-1' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"content":"What is 2 + 3?"}'
 ```
 
 ### SSE streaming (#14)
 
-`POST /sessions/{id}/messages/stream` uses the same body, `X-User-Id` check, and ownership rules as `POST /sessions/{id}/messages`. The response is `text/event-stream`. Each frame has an `event` name and one JSON `data` line whose `type` matches that name.
+`POST /sessions/{id}/messages/stream` uses the same body, bearer authentication, and ownership rules as `POST /sessions/{id}/messages`. The response is `text/event-stream`. Each frame has an `event` name and one JSON `data` line whose `type` matches that name.
 
 Pre-stream HTTP errors, in order:
 
-1. Validation (header or body) → **422**
-2. Checkpointer unavailable → **503**
-3. Unknown, archived, or another user's session → **404**
-4. LLM not configured → **503**
+1. Missing / invalid credentials → **401** (or Auth0 config / JWKS failure → **503**)
+2. Validation (body) → **422**
+3. Checkpointer unavailable → **503**
+4. Unknown, archived, or another user's session → **404**
+5. LLM not configured → **503**
 
 Once the stream has started, graph and model failures are `error` events. Disconnecting cancels the run and does not emit `error`. There is no replay.
 
@@ -119,12 +151,12 @@ Once the stream has started, graph and model failures are `error` events. Discon
 
 ```bash
 curl -N http://localhost:8000/sessions/<session-uuid>/messages/stream \
-  -H 'X-User-Id: demo-user-1' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"content":"What is 2 + 3?"}'
 ```
 
-`POST /agents/run` remains available for ad-hoc/stateless invokes (and optional `session_id` from #12).
+`POST /agents/run` remains available for ad-hoc/stateless invokes (and optional `session_id` from #12). It requires the same bearer token.
 
 ### Migrations
 
@@ -141,11 +173,12 @@ SQLite unit tests use `schema_translate_map` and do **not** replace running migr
 
 ```bash
 curl -s http://localhost:8000/agents/run \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"message":"What is 2 + 3?"}'
 ```
 
-Without `LLM_API_KEY`, `POST /agents/run` returns **503**.
+Without `LLM_API_KEY`, `POST /agents/run` returns **503**. Without a valid access token it returns **401**.
 
 `DATABASE_URL` is optional for `/health` but required for session APIs, Alembic, and the LangGraph checkpointer.
 
@@ -159,9 +192,9 @@ If `DATABASE_URL` is unset, the checkpointer stays disabled (stateless runs only
 | --- | --- |
 | No `session_id` | Graph compiled **without** a checkpointer (stateless), even if a saver exists |
 | Owned active `session_id` + saver available | Checkpointed graph; `thread_id = str(session.id)` |
-| `session_id` + saver unavailable | **503** (before identity/ownership DB queries) |
+| `session_id` + saver unavailable | **503** (after authentication; before ownership DB queries) |
 
-Durable turns require `X-User-Id` and a session UUID that belongs to that user and is not archived (unknown / other-user / archived → **404**). Clients never pass a raw `thread_id`. Each turn sends only the new user message; checkpoint restore retains history.
+Durable turns require a validated access token and a session UUID that belongs to that user and is not archived (unknown / other-user / archived → **404**). Clients never pass a raw `thread_id`. Each turn sends only the new user message; checkpoint restore retains history.
 
 **Restart recovery** means continuing a conversation from persisted checkpoint state after recreating the pool/saver/graph (e.g. process restart). It does **not** automatically resume an interrupted HTTP request.
 
@@ -170,7 +203,7 @@ Example (after creating a session):
 ```bash
 curl -s http://localhost:8000/agents/run \
   -H 'content-type: application/json' \
-  -H 'X-User-Id: demo-user-1' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"message":"What is 2 + 3?","session_id":"<session-uuid>"}'
 ```
 
@@ -197,6 +230,8 @@ pytest -m integration
 | `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL (use APAC if your org is on that data plane) |
 | `POSTGRES_SCHEMA` | `agent_platform` | Schema for ORM tables / Alembic version table |
 | `CHECKPOINTS_SCHEMA` | `langgraph` | Schema for LangGraph checkpoint tables |
+| `AUTH0_DOMAIN` | unset | Auth0 tenant hostname (required for protected routes) |
+| `AUTH0_AUDIENCE` | unset | Auth0 API audience (required for protected routes) |
 
 `POST /agents/run` returns `execution_id`. That id is the LangSmith root run id. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`.
 

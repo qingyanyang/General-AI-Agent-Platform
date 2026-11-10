@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     langsmith_api_key: str | None = None
     langsmith_project: str | None = None
     langsmith_endpoint: str | None = None
+    # Auth0 API access tokens. Domain is a hostname only (no scheme or path).
+    auth0_domain: str | None = None
+    auth0_audience: str | None = None
     log_level: str = "INFO"
 
     @property
