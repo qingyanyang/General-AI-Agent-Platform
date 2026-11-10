@@ -11,7 +11,7 @@ import httpx
 import jwt
 import pytest
 from app.agents.runtime import AgentMessageView, AgentResult
-from app.api.deps import get_current_user_id
+from app.api.deps import get_current_user
 from app.core.auth import (
     AuthNotConfigured,
     AuthRejected,
@@ -22,6 +22,7 @@ from app.core.auth import (
     verify_access_token,
 )
 from app.core.config import get_settings
+from app.core.permissions import ALL_PERMISSIONS
 from app.main import app
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
@@ -118,7 +119,7 @@ def test_missing_auth_config_returns_503(
     api_client: TestClient,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    app.dependency_overrides.pop(get_current_user_id, None)
+    app.dependency_overrides.pop(get_current_user, None)
     monkeypatch.setenv("AUTH0_DOMAIN", "")
     monkeypatch.setenv("AUTH0_AUDIENCE", "")
     get_settings.cache_clear()
@@ -131,7 +132,7 @@ def test_invalid_auth_domain_returns_503(
     api_client: TestClient,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    app.dependency_overrides.pop(get_current_user_id, None)
+    app.dependency_overrides.pop(get_current_user, None)
     monkeypatch.setenv("AUTH0_DOMAIN", "https://auth.test.example")
     monkeypatch.setenv("AUTH0_AUDIENCE", AUTH0_AUDIENCE)
     get_settings.cache_clear()
@@ -675,7 +676,7 @@ def test_verify_access_token_unit(
         return {jwk["kid"]: key}
 
     cache = JwksCache(fetch)
-    subject = asyncio.run(
+    user = asyncio.run(
         verify_access_token(
             _token(private_key),
             issuer=AUTH0_ISSUER,
@@ -683,4 +684,5 @@ def test_verify_access_token_unit(
             jwks=cache,
         )
     )
-    assert subject == "auth0|user-1"
+    assert user.user_id == "auth0|user-1"
+    assert user.permissions == ALL_PERMISSIONS

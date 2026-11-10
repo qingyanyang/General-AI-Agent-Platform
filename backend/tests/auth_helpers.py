@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import jwt
+from app.core.auth import AuthenticatedUser
+from app.core.permissions import ALL_PERMISSIONS
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException, Request, status
@@ -16,8 +19,8 @@ AUTH0_ISSUER = f"https://{AUTH0_DOMAIN}/"
 USER_ID_MAX_LENGTH = 128
 
 
-def stub_get_current_user_id(request: Request) -> str:
-    """Test-only identity that still reads ``X-User-Id``."""
+def stub_get_current_user(request: Request) -> AuthenticatedUser:
+    """Test-only identity that still reads ``X-User-Id`` and grants all permissions."""
     x_user_id = request.headers.get("x-user-id")
     if x_user_id is None:
         raise HTTPException(
@@ -35,7 +38,12 @@ def stub_get_current_user_id(request: Request) -> str:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"X-User-Id must be at most {USER_ID_MAX_LENGTH} characters",
         )
-    return user_id
+    return AuthenticatedUser(user_id=user_id, permissions=ALL_PERMISSIONS)
+
+
+def stub_get_current_user_id(request: Request) -> str:
+    """Backward-compatible subject stub used by older helpers."""
+    return stub_get_current_user(request).user_id
 
 
 def generate_rsa_keypair() -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
@@ -70,6 +78,8 @@ def sign_access_token(
     issuer: str = AUTH0_ISSUER,
     expires_in: int = 3600,
     algorithm: str = "RS256",
+    permissions: Sequence[str] | None = None,
+    include_permissions: bool = True,
     extra_claims: dict[str, Any] | None = None,
     omit_claims: set[str] | None = None,
 ) -> str:
@@ -81,6 +91,10 @@ def sign_access_token(
         "exp": now + expires_in,
         "iat": now,
     }
+    if include_permissions:
+        claims["permissions"] = (
+            list(permissions) if permissions is not None else sorted(ALL_PERMISSIONS)
+        )
     if extra_claims:
         claims.update(extra_claims)
     for claim in omit_claims or set():

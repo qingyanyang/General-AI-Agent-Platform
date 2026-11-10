@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import StreamOutcome, ensure_llm_configured
-from app.api.deps import get_current_user_id
+from app.api.deps import require_permissions
+from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
+from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
 from app.models.chat_session import ChatSession
 from app.schemas.chat_message import (
     ChatMessageCreate,
@@ -54,12 +56,12 @@ def _db_session(request: Request) -> Session:
 @router.post("", response_model=ChatSessionOut, status_code=status.HTTP_201_CREATED)
 def create_session(
     body: ChatSessionCreate,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
     session = session_service.create_session(
         db,
-        user_id=user_id,
+        user_id=user.user_id,
         agent_id=body.agent_id,
         title=body.title,
     )
@@ -68,14 +70,14 @@ def create_session(
 
 @router.get("", response_model=ChatSessionListOut)
 def list_sessions(
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
     db: Annotated[Session, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> ChatSessionListOut:
     page = session_service.list_sessions(
         db,
-        user_id=user_id,
+        user_id=user.user_id,
         limit=limit,
         cursor=cursor,
     )
@@ -88,12 +90,12 @@ def list_sessions(
 @router.get("/{session_id}", response_model=ChatSessionOut)
 def get_session(
     session_id: uuid.UUID,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
     session = session_service.get_active_session_for_user(
         db,
-        user_id=user_id,
+        user_id=user.user_id,
         session_id=session_id,
     )
     return ChatSessionOut.model_validate(session)
@@ -102,10 +104,10 @@ def get_session(
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
     session_id: uuid.UUID,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
-    session_service.archive_session(db, user_id=user_id, session_id=session_id)
+    session_service.archive_session(db, user_id=user.user_id, session_id=session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -141,13 +143,13 @@ def _require_checkpointer(request: Request):
 async def list_messages(
     session_id: uuid.UUID,
     request: Request,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatMessageListOut:
     checkpointer = _require_checkpointer(request)
     chat_session = session_service.get_active_session_for_user(
         db,
-        user_id=user_id,
+        user_id=user.user_id,
         session_id=session_id,
     )
     items = await message_service.load_session_messages(
@@ -162,14 +164,14 @@ async def create_message(
     session_id: uuid.UUID,
     body: ChatMessageCreate,
     request: Request,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
 ) -> ChatMessageCreateResult:
     checkpointer = _require_checkpointer(request)
     # Short-lived DB scope for ownership only — do not hold the connection across LLM work.
     with _db_session(request) as db:
         chat_session = session_service.get_active_session_for_user(
             db,
-            user_id=user_id,
+            user_id=user.user_id,
             session_id=session_id,
         )
         owned_session_id = chat_session.id
@@ -225,13 +227,13 @@ async def stream_message(
     session_id: uuid.UUID,
     body: ChatMessageCreate,
     request: Request,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
 ) -> StreamingResponse:
     checkpointer = _require_checkpointer(request)
     with _db_session(request) as db:
         chat_session = session_service.get_active_session_for_user(
             db,
-            user_id=user_id,
+            user_id=user.user_id,
             session_id=session_id,
         )
         owned_session_id = chat_session.id
