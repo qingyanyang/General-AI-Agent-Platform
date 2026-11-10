@@ -94,6 +94,36 @@ curl -s http://localhost:8000/sessions/<session-uuid>/messages \
   -d '{"content":"What is 2 + 3?"}'
 ```
 
+### SSE streaming (#14)
+
+`POST /sessions/{id}/messages/stream` uses the same body, `X-User-Id` check, and ownership rules as `POST /sessions/{id}/messages`. The response is `text/event-stream`. Each frame has an `event` name and one JSON `data` line whose `type` matches that name.
+
+Pre-stream HTTP errors, in order:
+
+1. Validation (header or body) → **422**
+2. Checkpointer unavailable → **503**
+3. Unknown, archived, or another user's session → **404**
+4. LLM not configured → **503**
+
+Once the stream has started, graph and model failures are `error` events. Disconnecting cancels the run and does not emit `error`. There is no replay.
+
+| Event | Meaning |
+| --- | --- |
+| `message.delta` | Assistant text emitted during the run, including text before a tool request. Concatenated deltas are not the final reply. |
+| `tool.start` | The model requested a tool (`tool_call_id`, `name`). The tool may still be rejected. |
+| `tool.end` | One tool result (`tool_call_id`, `name`, `content`). Validation and execution errors stay in `content`. |
+| `done` | Authoritative final assistant message: `{ "role": "assistant", "content" }`. |
+| `error` | Recursion limit or unexpected execution failure (`message`). No `done` follows. |
+
+`last_activity_at` is updated after the graph succeeds and before `done`, in its own database session. A timestamp failure is rolled back and logged; `done` is still sent. A cancelled run does not update activity. If the model had already requested a tool, each unfinished call is recorded as `Tool execution cancelled` so the next turn stays valid. Other checkpoint rows already written are left as they are.
+
+```bash
+curl -N http://localhost:8000/sessions/<session-uuid>/messages/stream \
+  -H 'X-User-Id: demo-user-1' \
+  -H 'content-type: application/json' \
+  -d '{"content":"What is 2 + 3?"}'
+```
+
 `POST /agents/run` remains available for ad-hoc/stateless invokes (and optional `session_id` from #12).
 
 ### Migrations

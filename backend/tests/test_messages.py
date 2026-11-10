@@ -13,33 +13,13 @@ from app.core.config import get_settings
 from app.schemas.chat_message import MESSAGE_CONTENT_MAX_LENGTH, ChatMessageOut
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.memory import InMemorySaver
 from pytest import MonkeyPatch
 
+from tests.chat_helpers import OTHER
+from tests.chat_helpers import create_session as _create_session
+from tests.chat_helpers import headers as _headers
+from tests.chat_helpers import with_saver as _with_saver
 from tests.fakes import ScriptedChatModel
-
-USER = "owner"
-OTHER = "intruder"
-
-
-def _headers(user_id: str = USER) -> dict[str, str]:
-    return {"X-User-Id": user_id}
-
-
-def _create_session(api_client: TestClient, *, user_id: str = USER) -> dict:
-    response = api_client.post(
-        "/sessions",
-        json={"agent_id": "default"},
-        headers=_headers(user_id),
-    )
-    assert response.status_code == 201
-    return response.json()
-
-
-def _with_saver(api_client: TestClient) -> InMemorySaver:
-    saver = InMemorySaver()
-    api_client.app.state.checkpointer = saver
-    return saver
 
 
 def test_message_role_and_content_normalization() -> None:
