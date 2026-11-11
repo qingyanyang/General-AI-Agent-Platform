@@ -8,9 +8,7 @@ import pytest
 from app.agents.graph import build_agent_graph
 from app.agents.runtime import run_agent
 from app.agents.tool_policy import (
-    AGENT_TOOL_ALLOWLIST,
     BUILTIN_REQUIRED_PERMISSIONS,
-    BUILTIN_TOOL_NAMES,
     ToolAuthorizationError,
     reset_tool_auth_context,
     set_tool_auth_context,
@@ -26,10 +24,11 @@ from app.agents.tools import (
 )
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
-from pytest import MonkeyPatch
 
-from tests.chat_helpers import default_tool_auth
+from tests.chat_helpers import default_execution_config, default_tool_auth
 from tests.fakes import ScriptedChatModel
+
+_BOOM_AUTH = default_tool_auth(allowed_tools=frozenset({"boom"}))
 
 
 def test_register_and_retrieve_tools() -> None:
@@ -117,7 +116,12 @@ def test_langgraph_invokes_registered_tool() -> None:
         ]
     )
     result = asyncio.run(
-        run_agent("What is 137 * 29?", tool_auth=default_tool_auth(), llm=llm),
+        run_agent(
+            "What is 137 * 29?",
+            tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
+            llm=llm,
+        ),
     )
     roles = [item.role for item in result.messages]
     assert "tool" in roles
@@ -143,13 +147,20 @@ def test_unregistered_tool_call_returns_error_tool_message() -> None:
             AIMessage(content="I could not use that tool."),
         ]
     )
-    result = asyncio.run(run_agent("hack", tool_auth=default_tool_auth(), llm=llm))
+    result = asyncio.run(
+        run_agent(
+            "hack",
+            tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
+            llm=llm,
+        )
+    )
     tool_msg = next(item for item in result.messages if item.role == "tool")
     assert "not registered" in tool_msg.content
     assert result.reply == "I could not use that tool."
 
 
-def test_tool_execution_failure_does_not_crash_graph(monkeypatch: MonkeyPatch) -> None:
+def test_tool_execution_failure_does_not_crash_graph() -> None:
     @tool
     def boom() -> str:
         """Always fails."""
@@ -157,11 +168,6 @@ def test_tool_execution_failure_does_not_crash_graph(monkeypatch: MonkeyPatch) -
 
     registry = ToolRegistry()
     registry.register(boom, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
-    monkeypatch.setitem(
-        AGENT_TOOL_ALLOWLIST,
-        "default",
-        BUILTIN_TOOL_NAMES | frozenset({"boom"}),
-    )
 
     llm = ScriptedChatModel(
         script=[
@@ -184,7 +190,7 @@ def test_tool_execution_failure_does_not_crash_graph(monkeypatch: MonkeyPatch) -
         registry=registry,
         permitted_tools=frozenset({"boom"}),
     )
-    token = set_tool_auth_context(default_tool_auth())
+    token = set_tool_auth_context(_BOOM_AUTH)
     try:
         result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="go")]}))
     finally:

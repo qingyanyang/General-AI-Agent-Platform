@@ -98,13 +98,26 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction |
+| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction; config defaults: empty prompt, catalog default LLM, `tool_names=[]` |
 | `GET` | `/agents` | `agents:read` — lists agents the caller can **view** (`status=active\|inactive\|all`, default `active`) |
 | `GET` | `/agents/{agent_id}` | `agents:read` + view grant; **missing view → 404** (catalog non-disclosure; distinct from session-scoped **403**) |
 | `PATCH` | `/agents/{agent_id}` | `agents:configure` + configure grant — `name` / `description` only (`id` immutable; omit vs `null` for description) |
+| `GET` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — system prompt, LLM, temperature, tool assignments |
+| `PUT` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — full replace (row-locked); adding tools requires each tool's `required_permissions` |
 | `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + configure grant — soft-deactivate (idempotent) |
 
-**Deactivation** blocks **all new executions** with **409** `Agent is inactive` (before the model runs): new sessions, existing-session JSON/SSE, and session-scoped or stateless `/agents/run`. Existing history remains readable under ownership + view grants. Tools for new agents still follow the #18 code allowlist until #20.
+**Deactivation** blocks **all new executions** with **409** `Agent is inactive` (before the model runs): new sessions, existing-session JSON/SSE, and session-scoped or stateless `/agents/run`. Existing history remains readable under ownership + view grants.
+
+### Agent configuration (#20)
+
+Persisted per agent: `system_prompt` (exact max **20 000** characters; whitespace preserved), `llm_provider` / `llm_model` (must be in `APPROVED_LLM_MODELS`), `temperature` (required when the approved entry supports it; must be `null` when it does not), and `tool_names` (registered tools only; **empty means no tools**, never all tools).
+
+- **GET/PUT** `/agents/{id}/configuration` require both the `agents:configure` permission and a configure grant (same dual authz as catalog mutate). Prompt and tool lists are not returned on `AgentOut` list/get.
+- **Disclosure caveat:** configure-gated GET protects the stored prompt from users without configure access, but a model may still echo or paraphrase prompt content in replies visible to executors.
+- **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once, builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
+- **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history.
+- **Tool assignment:** adding a tool checks the caller's permissions against that tool's `required_permissions`; removing a tool does not. Runtime authorization uses `ToolAuthContext.allowed_tools` from the snapshot (replaces the former code allowlist map).
+- Migration `20261111_0005` backfills fixed DeepSeek literals (`deepseek` / `deepseek-flash` / `temperature=1.0`); `default` also gets built-in tools. Application `POST /agents` defaults come from settings + catalog (no silent “first catalog entry” fallback if `LLM_PROVIDER`/`LLM_MODEL` are unapproved).
 
 Platform permissions remain required to use creator auto-grants (having `can_execute` on a grant does not replace `agents:execute`).
 
@@ -215,7 +228,8 @@ Pre-stream HTTP errors, in order:
 2. Validation (body) → **422**
 3. Checkpointer unavailable → **503**
 4. Unknown, archived, or another user's session → **404**
-5. LLM not configured → **503**
+5. Agent inactive → **409**; missing execute grant → **403**
+6. Invalid/missing agent configuration or LLM API key → **503** (before SSE starts)
 
 Once the stream has started, graph and model failures are `error` events. Disconnecting cancels the run and does not emit `error`. There is no replay.
 
@@ -298,13 +312,14 @@ pytest -m integration
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `openai` | `openai` or `deepseek` (OpenAI-compatible API) |
-| `LLM_API_KEY` | unset | Primary key for live `POST /agents/run` |
+| `LLM_PROVIDER` | `openai` | Process default provider; must be in `APPROVED_LLM_MODELS` with `LLM_MODEL` (no silent fallback) |
+| `LLM_API_KEY` | unset | Primary key for live agent runs (process-wide; not stored per agent) |
 | `DEEPSEEK_API_KEY` | unset | Optional DeepSeek key if `LLM_API_KEY` is unset |
-| `LLM_MODEL` | `gpt-4o-mini` | Model id; DeepSeek default becomes `deepseek-flash` when still on the OpenAI default |
+| `LLM_MODEL` | `gpt-4o-mini` | Process default model; DeepSeek + this OpenAI default remaps to `deepseek-flash` for create defaults and legacy `create_chat_model` |
 | `LLM_BASE_URL` | unset | OpenAI-compatible base URL; DeepSeek defaults to `https://api.deepseek.com` |
+| `APPROVED_LLM_MODELS` | built-in JSON catalog | JSON array of `{provider, model, temperature_min?, temperature_max?}`; PUT configuration and create defaults must match |
 | `AGENT_RECURSION_LIMIT` | `10` | LangGraph recursion limit (tool-loop guard) |
-| `AGENT_ID` | `default` | Id stored on each trace (`metadata.agent_id`) |
+| `AGENT_ID` | `default` | Stateless `/agents/run` target + LangSmith `metadata.agent_id` |
 | `LANGSMITH_TRACING` | `false` | Turn on LangSmith tracing for agent runs |
 | `LANGSMITH_API_KEY` | unset | Required when tracing is on; tracing stays off if it is missing |
 | `LANGSMITH_ENDPOINT` | LangSmith default | Optional API base URL (use APAC if your org is on that data plane) |
@@ -319,11 +334,11 @@ pytest -m integration
 
 Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`. Each registration declares `required_permissions` (built-ins require `agents:execute`).
 
-**Authorization (#18)** is separate from agent access grants (#17):
+**Authorization (#18 + #20)** is separate from agent access grants (#17):
 
-- A code/config allowlist maps `agent_id` → permitted tool names (`default` gets all built-ins; `reporting` is a strict subset for tests). Unknown agents get an empty set (fail closed).
-- Public runners (`run_agent` / `stream_agent`) require a trusted `ToolAuthContext` (`user_id`, `permissions`, `agent_id`) from the API — never from the model.
-- The model only sees the permitted intersection (allowlist ∩ registry ∩ user permissions). An empty set uses an unbound model (no `bind_tools([])`). There is no full-registry fallback.
+- Each agent's persisted `tool_names` is the allowlist. Empty means **no tools** (fail closed). There is no code-level `agent_id` → tools map.
+- Public runners (`run_agent` / `stream_agent`) require a trusted `ToolAuthContext` (`user_id`, `permissions`, `agent_id`, `allowed_tools`) and an `AgentExecutionConfig` snapshot from the API — never from the model.
+- The model only sees the permitted intersection (`allowed_tools` ∩ registry ∩ user permissions). An empty set uses an unbound model (no `bind_tools([])`). There is no full-registry fallback.
 - `registry.aexecute(..., context=None)` is the sole execution-time authz boundary; omitted context raises `ToolAuthorizationError` (not `TypeError`). The tools node maps denials to controlled `ToolMessage`s.
 - Auth context is bound on a non-persisted `ContextVar` inside the graph consumer / stream producer (`try`/`finally`). It is not written to checkpoints or LangSmith metadata/`configurable`.
 

@@ -590,8 +590,8 @@ def test_protected_families_require_bearer_without_override(
 
     client.app.state.checkpointer = InMemorySaver()
     monkeypatch.setattr(
-        "app.agents.graph.create_chat_model",
-        lambda: ScriptedChatModel(
+        "app.agents.runtime.create_chat_model_for_agent",
+        lambda **_kwargs: ScriptedChatModel(
             script=[
                 AIMessage(content="ok"),
                 AIMessage(content="streamed"),

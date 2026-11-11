@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -47,44 +47,58 @@ def _note_inflight_task() -> None:
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
-OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 
 
-def create_chat_model() -> ChatOpenAI:
-    """Build an OpenAI-compatible chat model from settings (OpenAI or DeepSeek)."""
+def create_chat_model_for_agent(
+    *,
+    provider: str,
+    model: str,
+    temperature: float | None,
+) -> ChatOpenAI:
+    """Build a chat model from an agent configuration snapshot + process-wide keys."""
     settings = get_settings()
-    provider = settings.llm_provider.strip().lower()
-    if provider not in {"openai", "deepseek"}:
+    normalized = provider.strip().lower()
+    if normalized not in {"openai", "deepseek"}:
         raise AgentNotConfiguredError(
-            f"Unsupported LLM_PROVIDER '{settings.llm_provider}'; use 'openai' or 'deepseek'",
+            f"Unsupported LLM provider '{provider}'; use 'openai' or 'deepseek'",
         )
 
-    api_key = settings.resolve_llm_api_key()
+    api_key = settings.resolve_llm_api_key_for_provider(normalized)
     if not api_key:
-        if provider == "deepseek":
+        if normalized == "deepseek":
             raise AgentNotConfiguredError(
                 "LLM_API_KEY or DEEPSEEK_API_KEY is not configured",
             )
         raise AgentNotConfiguredError("LLM_API_KEY is not configured")
 
-    model = settings.llm_model
     base_url = settings.llm_base_url
     kwargs: dict[str, object] = {
         "model": model,
         "api_key": api_key,
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
 
-    if provider == "deepseek":
+    if normalized == "deepseek":
         # Docs: https://api-docs.deepseek.com/ — OpenAI-compatible; tool calling supported.
         kwargs["base_url"] = base_url or DEEPSEEK_BASE_URL
-        if model == OPENAI_DEFAULT_MODEL:
-            kwargs["model"] = DEEPSEEK_DEFAULT_MODEL
         # Tool-calls guide disables thinking for reliable function calling.
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     elif base_url:
         kwargs["base_url"] = base_url
 
     return ChatOpenAI(**kwargs)
+
+
+def create_chat_model() -> ChatOpenAI:
+    """Build an OpenAI-compatible chat model from process settings (legacy/tests)."""
+    settings = get_settings()
+    provider, model = settings.resolved_process_llm()
+    return create_chat_model_for_agent(
+        provider=provider,
+        model=model,
+        temperature=None,
+    )
 
 
 def _tool_call_args(tool_call: dict[str, Any] | Any) -> dict[str, Any]:
@@ -187,13 +201,24 @@ async def _execute_registered_tools(
     return {"messages": outputs}
 
 
-# Production-path cache (llm/registry defaulted). Keyed by checkpointer + permitted tools.
-_graph_cache: dict[tuple[int | None, frozenset[str]], CompiledStateGraph] = {}
+# Production-path cache (llm/registry/prompt defaulted).
+# Keyed by checkpointer + permitted tools + system_prompt.
+_graph_cache: dict[tuple[int | None, frozenset[str], str], CompiledStateGraph] = {}
 
 
 def clear_agent_graph_cache() -> None:
     """Drop cached compiled graphs (tests / settings changes)."""
     _graph_cache.clear()
+
+
+def _messages_for_model(
+    messages: list[BaseMessage],
+    system_prompt: str,
+) -> list[BaseMessage]:
+    """Prepend system prompt for the model call only (not persisted by callers)."""
+    if not system_prompt:
+        return messages
+    return [SystemMessage(content=system_prompt), *messages]
 
 
 def build_agent_graph(
@@ -202,6 +227,7 @@ def build_agent_graph(
     registry: ToolRegistry | None = None,
     checkpointer: Any | None = None,
     permitted_tools: frozenset[str] | None = None,
+    system_prompt: str = "",
 ) -> CompiledStateGraph:
     """Compile the agent graph using registry-backed tools only.
 
@@ -212,14 +238,21 @@ def build_agent_graph(
     empty binds no tools (unbound model — never ``bind_tools([])``). There is
     no unfiltered full-registry fallback.
 
+    ``system_prompt`` is prepended to each model-call input only; it is not
+    written into graph state / checkpoint messages.
+
     When ``llm`` and ``registry`` are omitted, compiled graphs are cached per
-    checkpointer instance and permitted set for the process lifetime.
+    checkpointer, permitted set, and system prompt for the process lifetime.
+    Prefer passing an explicit ``llm`` from agent configuration so per-agent
+    models are not incorrectly shared.
     """
     permitted = frozenset(permitted_tools or ())
+    prompt = system_prompt or ""
     use_cache = llm is None and registry is None
-    cache_key: tuple[int | None, frozenset[str]] = (
+    cache_key: tuple[int | None, frozenset[str], str] = (
         id(checkpointer) if checkpointer is not None else None,
         permitted,
+        prompt,
     )
     if use_cache and cache_key in _graph_cache:
         return _graph_cache[cache_key]
@@ -232,8 +265,9 @@ def build_agent_graph(
 
     async def llm_node(state: AgentState) -> dict:
         _note_inflight_task()
+        model_input = _messages_for_model(list(state["messages"]), prompt)
         merged = None
-        async for chunk in model_with_tools.astream(state["messages"]):
+        async for chunk in model_with_tools.astream(model_input):
             merged = chunk if merged is None else merged + chunk
         if merged is None:
             return {"messages": [AIMessage(content="")]}

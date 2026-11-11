@@ -1,12 +1,14 @@
-"""Persisted agent catalog records (#19)."""
+"""Persisted agent catalog records (#19) and configuration (#20)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
-from sqlalchemy import DateTime, Index, String, Text, func
+from sqlalchemy import DateTime, Float, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from app.models.base import Base, postgres_schema_name
 
@@ -43,3 +45,9 @@ class Agent(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    # Configuration (#20)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    llm_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tool_names: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)

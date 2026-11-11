@@ -1,9 +1,10 @@
+import pytest
 from app.agents.graph import (
     DEEPSEEK_BASE_URL,
     DEEPSEEK_DEFAULT_MODEL,
     create_chat_model,
 )
-from app.core.config import Settings, get_settings
+from app.core.config import ApprovedLlmCatalogError, Settings, get_settings
 from pytest import MonkeyPatch
 
 
@@ -74,6 +75,27 @@ def test_resolve_llm_api_key_falls_back_to_deepseek(monkeypatch: MonkeyPatch) ->
     settings = Settings(_env_file=None)
     assert settings.resolve_llm_api_key() == "deepseek-key"
     get_settings.cache_clear()
+
+
+def test_default_approved_llm_remaps_deepseek_openai_default() -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_provider="deepseek",
+        llm_model="gpt-4o-mini",
+    )
+    approved = settings.default_approved_llm()
+    assert approved.provider == "deepseek"
+    assert approved.model == DEEPSEEK_DEFAULT_MODEL
+
+
+def test_default_approved_llm_rejects_unapproved_after_resolve() -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_provider="deepseek",
+        llm_model="not-a-real-model",
+    )
+    with pytest.raises(ApprovedLlmCatalogError, match="not in APPROVED_LLM_MODELS"):
+        settings.default_approved_llm()
 
 
 def test_create_chat_model_deepseek_defaults(monkeypatch: MonkeyPatch) -> None:

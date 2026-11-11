@@ -10,7 +10,6 @@ import pytest
 from app.agents.errors import AgentExecutionError
 from app.agents.runtime import StreamOutcome, run_agent, stream_agent
 from app.agents.tool_policy import (
-    AGENT_TOOL_ALLOWLIST,
     BUILTIN_REQUIRED_PERMISSIONS,
     ToolAuthContext,
     ToolAuthorizationError,
@@ -26,7 +25,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from tests.chat_helpers import create_session, default_tool_auth, headers, with_saver
+from tests.chat_helpers import (
+    REPORTING_TOOL_NAMES,
+    create_session,
+    default_execution_config,
+    default_tool_auth,
+    headers,
+    with_saver,
+)
 from tests.fakes import ScriptedChatModel
 
 
@@ -51,7 +57,7 @@ def _use_model(monkeypatch: MonkeyPatch, model: ScriptedChatModel) -> None:
         return Settings(_env_file=None, llm_api_key="test-key")
 
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_with_key)
-    monkeypatch.setattr("app.agents.graph.create_chat_model", lambda: model)
+    monkeypatch.setattr("app.agents.runtime.create_chat_model_for_agent", lambda **_kwargs: model)
 
 
 def test_permitted_tools_for_default_agent() -> None:
@@ -62,13 +68,16 @@ def test_permitted_tools_for_default_agent() -> None:
 
 def test_permitted_tools_reporting_subset() -> None:
     registry = create_default_registry()
-    auth = default_tool_auth(agent_id="reporting")
+    auth = default_tool_auth(
+        agent_id="reporting",
+        allowed_tools=frozenset(REPORTING_TOOL_NAMES),
+    )
     assert permitted_tool_names(registry, auth) == frozenset({"echo"})
 
 
-def test_unknown_agent_permits_nothing() -> None:
+def test_empty_allowed_tools_permits_nothing() -> None:
     registry = create_default_registry()
-    auth = default_tool_auth(agent_id="unknown-agent")
+    auth = default_tool_auth(agent_id="unknown-agent", allowed_tools=frozenset())
     assert permitted_tool_names(registry, auth) == frozenset()
 
 
@@ -103,7 +112,10 @@ def test_aexecute_denies_without_invoking_tool() -> None:
             registry.aexecute(
                 "add",
                 {"a": 1, "b": 2},
-                context=default_tool_auth(agent_id="reporting"),
+                context=default_tool_auth(
+                    agent_id="reporting",
+                    allowed_tools=frozenset(REPORTING_TOOL_NAMES),
+                ),
             ),
         )
     assert calls == []
@@ -150,7 +162,14 @@ def test_forged_forbidden_tool_denied_in_run_agent() -> None:
     result = asyncio.run(
         run_agent(
             "add please",
-            tool_auth=default_tool_auth(agent_id="reporting"),
+            tool_auth=default_tool_auth(
+                agent_id="reporting",
+                allowed_tools=frozenset(REPORTING_TOOL_NAMES),
+            ),
+            execution_config=default_execution_config(
+                agent_id="reporting",
+                tool_names=REPORTING_TOOL_NAMES,
+            ),
             llm=llm,
         ),
     )
@@ -172,7 +191,14 @@ def test_forged_forbidden_tool_denied_in_stream_agent() -> None:
     async def _run() -> None:
         async for event in stream_agent(
             "add please",
-            tool_auth=default_tool_auth(agent_id="reporting"),
+            tool_auth=default_tool_auth(
+                agent_id="reporting",
+                allowed_tools=frozenset(REPORTING_TOOL_NAMES),
+            ),
+            execution_config=default_execution_config(
+                agent_id="reporting",
+                tool_names=REPORTING_TOOL_NAMES,
+            ),
             llm=llm,
             outcome=outcome,
         ):
@@ -196,7 +222,14 @@ def test_empty_permitted_set_still_denies_forged_calls() -> None:
     result = asyncio.run(
         run_agent(
             "hack",
-            tool_auth=default_tool_auth(agent_id="no-such-agent"),
+            tool_auth=default_tool_auth(
+                agent_id="no-such-agent",
+                allowed_tools=frozenset(),
+            ),
+            execution_config=default_execution_config(
+                agent_id="no-such-agent",
+                tool_names=(),
+            ),
             llm=llm,
         ),
     )
@@ -209,7 +242,12 @@ def test_json_session_message_denies_forbidden_tool(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client, db_session, agent_id="reporting")
+    created = create_session(
+        api_client,
+        db_session,
+        agent_id="reporting",
+        tool_names=list(REPORTING_TOOL_NAMES),
+    )
     with_saver(api_client)
     _use_model(
         monkeypatch,
@@ -242,7 +280,12 @@ def test_sse_session_message_denies_forbidden_tool(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    created = create_session(api_client, db_session, agent_id="reporting")
+    created = create_session(
+        api_client,
+        db_session,
+        agent_id="reporting",
+        tool_names=list(REPORTING_TOOL_NAMES),
+    )
     with_saver(api_client)
     _use_model(
         monkeypatch,
@@ -283,7 +326,12 @@ def test_agents_run_denies_forbidden_tool(
 ) -> None:
     from tests.chat_helpers import seed_agent_grant
 
-    seed_agent_grant(db_session, "test-user", agent_id="reporting")
+    seed_agent_grant(
+        db_session,
+        "test-user",
+        agent_id="reporting",
+        tool_names=list(REPORTING_TOOL_NAMES),
+    )
     monkeypatch.setenv("AGENT_ID", "reporting")
     from app.core.config import get_settings
 
@@ -347,11 +395,20 @@ def test_concurrent_runs_isolate_auth_context() -> None:
             run_agent(
                 "a",
                 tool_auth=default_tool_auth(user_id="user-a", agent_id="default"),
+                execution_config=default_execution_config(),
                 llm=model_a,
             ),
             run_agent(
                 "b",
-                tool_auth=default_tool_auth(user_id="user-b", agent_id="reporting"),
+                tool_auth=default_tool_auth(
+                    user_id="user-b",
+                    agent_id="reporting",
+                    allowed_tools=frozenset(REPORTING_TOOL_NAMES),
+                ),
+                execution_config=default_execution_config(
+                    agent_id="reporting",
+                    tool_names=REPORTING_TOOL_NAMES,
+                ),
                 llm=model_b,
             ),
         )
@@ -369,7 +426,12 @@ def test_contextvar_cleared_after_failure() -> None:
 
     with pytest.raises(AgentExecutionError):
         asyncio.run(
-            run_agent("hi", tool_auth=default_tool_auth(), llm=Boom(script=[])),
+            run_agent(
+                "hi",
+                tool_auth=default_tool_auth(),
+                execution_config=default_execution_config(),
+                llm=Boom(script=[]),
+            ),
         )
     assert get_tool_auth_context() is None
 
@@ -388,6 +450,7 @@ def test_contextvar_cleared_after_cancellation() -> None:
             run_agent(
                 "hi",
                 tool_auth=default_tool_auth(),
+                execution_config=default_execution_config(),
                 llm=Blocking(script=[]),
             ),
         )
@@ -412,6 +475,7 @@ def test_auth_absent_from_checkpoint_payload() -> None:
         run_agent(
             "remember this",
             tool_auth=auth,
+            execution_config=default_execution_config(),
             llm=ScriptedChatModel(script=[AIMessage(content="ok")]),
             checkpointer=saver,
             thread_id=thread_id,
@@ -443,7 +507,14 @@ def test_auth_absent_from_trace_config(monkeypatch: MonkeyPatch) -> None:
         permissions=frozenset({PERM_AGENTS_EXECUTE, "custom:secret"}),
         agent_id="default",
     )
-    result = asyncio.run(run_agent("hi", tool_auth=auth, llm=ScriptedChatModel(script=[])))
+    result = asyncio.run(
+        run_agent(
+            "hi",
+            tool_auth=auth,
+            execution_config=default_execution_config(),
+            llm=ScriptedChatModel(script=[]),
+        )
+    )
     assert result.reply == "done"
     rendered = json.dumps(captured["config"], default=str)
     assert "trace-user" not in rendered
@@ -457,6 +528,7 @@ def test_auth_absent_from_trace_config(monkeypatch: MonkeyPatch) -> None:
         assert "user_id" not in configurable
 
 
-def test_allowlist_map_documents_reporting_subset() -> None:
-    assert AGENT_TOOL_ALLOWLIST["reporting"] == frozenset({"echo"})
-    assert "add" not in AGENT_TOOL_ALLOWLIST["reporting"]
+def test_persisted_reporting_tools_are_echo_only() -> None:
+    """Reporting fixture assigns echo only (replaces former code allowlist)."""
+    assert REPORTING_TOOL_NAMES == ("echo",)
+    assert "add" not in REPORTING_TOOL_NAMES

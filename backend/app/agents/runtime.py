@@ -14,7 +14,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langgraph.errors import GraphRecursionError
 
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
-from app.agents.graph import build_agent_graph, inflight_node_tasks
+from app.agents.graph import (
+    build_agent_graph,
+    create_chat_model_for_agent,
+    inflight_node_tasks,
+)
 from app.agents.messages import (
     extract_assistant_reply,
     message_content_text,
@@ -37,6 +41,7 @@ from app.schemas.chat_message import (
     StreamToolEnd,
     StreamToolStart,
 )
+from app.services.agents import AgentExecutionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +95,7 @@ async def run_agent(
     message: str,
     *,
     tool_auth: ToolAuthContext,
+    execution_config: AgentExecutionConfig,
     llm: BaseChatModel | None = None,
     checkpointer: Any | None = None,
     thread_id: str | None = None,
@@ -100,12 +106,17 @@ async def run_agent(
     Durable path (``thread_id`` set): require ``checkpointer`` and compile with it.
     Each turn passes only the new ``HumanMessage``; checkpoint restore retains history.
 
-    ``tool_auth`` is required. It is bound on a ContextVar for this task only
-    (not persisted in checkpoints or LangSmith metadata).
+    ``tool_auth`` and ``execution_config`` are required. Config is an immutable
+    snapshot from the API layer — this function does not open a DB session.
     """
     settings = get_settings()
-    if llm is None:
-        ensure_llm_configured()
+    resolved_llm = llm
+    if resolved_llm is None:
+        resolved_llm = create_chat_model_for_agent(
+            provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+            temperature=execution_config.temperature,
+        )
 
     if thread_id is not None and checkpointer is None:
         raise AgentNotConfiguredError(
@@ -121,10 +132,11 @@ async def run_agent(
     try:
         try:
             graph = build_agent_graph(
-                llm=llm,
-                registry=registry if llm is not None else None,
+                llm=resolved_llm,
+                registry=registry,
                 checkpointer=checkpointer if use_checkpointer else None,
                 permitted_tools=permitted,
+                system_prompt=execution_config.system_prompt,
             )
             config = build_run_config(
                 settings,
@@ -355,6 +367,7 @@ async def stream_agent(
     message: str,
     *,
     tool_auth: ToolAuthContext,
+    execution_config: AgentExecutionConfig,
     llm: BaseChatModel | None = None,
     checkpointer: Any | None = None,
     thread_id: str | None = None,
@@ -369,16 +382,22 @@ async def stream_agent(
     tool call without a result writes ``Tool execution cancelled`` for each
     pending id so the next turn stays valid.
 
-    ``tool_auth`` is required and bound on a ContextVar inside this generator
-    (the stream producer task) via try/finally — not in request-handler scope.
+    ``tool_auth`` and ``execution_config`` are required. Config is an immutable
+    snapshot — this function does not open a DB session. Callers must validate
+    the snapshot before starting SSE so failures return HTTP 503.
 
     The caller must own this generator. Closing it from a second task while it
     is running is not supported; cancel the task that is iterating it.
     """
     if outcome is None:
         outcome = StreamOutcome()
-    if llm is None:
-        ensure_llm_configured()
+    resolved_llm = llm
+    if resolved_llm is None:
+        resolved_llm = create_chat_model_for_agent(
+            provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+            temperature=execution_config.temperature,
+        )
     _require_checkpointer_for_thread(thread_id, checkpointer)
 
     settings = get_settings()
@@ -401,10 +420,11 @@ async def stream_agent(
     try:
         try:
             graph = build_agent_graph(
-                llm=llm,
-                registry=registry if llm is not None else None,
+                llm=resolved_llm,
+                registry=registry,
                 checkpointer=checkpointer if use_checkpointer else None,
                 permitted_tools=permitted,
+                system_prompt=execution_config.system_prompt,
             )
             config = build_run_config(
                 settings,

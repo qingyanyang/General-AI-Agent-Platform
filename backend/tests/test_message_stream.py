@@ -32,6 +32,7 @@ from tests.chat_helpers import (
     OTHER,
     USER,
     create_session,
+    default_execution_config,
     default_tool_auth,
     headers,
     with_saver,
@@ -87,7 +88,7 @@ def _parse_sse(body: str) -> list[dict]:
 
 def _use_model(monkeypatch: MonkeyPatch, model: ScriptedChatModel) -> None:
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_with_key)
-    monkeypatch.setattr("app.agents.graph.create_chat_model", lambda: model)
+    monkeypatch.setattr("app.agents.runtime.create_chat_model_for_agent", lambda **_kwargs: model)
 
 
 def _stream(api_client: TestClient, session_id: str, content: str = "hi") -> tuple[int, str, str]:
@@ -139,6 +140,7 @@ def test_streamed_chunks_merge_text_and_tool_arguments() -> None:
         run_agent(
             "Hi",
             tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
             llm=ScriptedChatModel(script=[AIMessage(content="Hello!")]),
         ),
     )
@@ -150,6 +152,7 @@ def test_streamed_chunks_merge_text_and_tool_arguments() -> None:
         run_agent(
             "What is 2 + 3?",
             tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
             llm=ScriptedChatModel(
                 script=[
                     _tool_call_message(),
@@ -299,6 +302,11 @@ def test_missing_llm_after_ownership_returns_503(
 ) -> None:
     created = create_session(api_client, db_session)
     with_saver(api_client)
+    # Pre-SSE validation uses process settings; clear keys before the stream opens.
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.services.agents.get_settings", _settings_without_key)
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_key)
     response = api_client.post(
         f"/sessions/{created['id']}/messages/stream",
@@ -385,6 +393,7 @@ def test_cancel_producer_task_propagates_without_error_event() -> None:
             async for event in stream_agent(
                 "hi",
                 tool_auth=default_tool_auth(),
+                execution_config=default_execution_config(),
                 llm=model,
             ):
                 events.append(event)
@@ -458,6 +467,7 @@ def test_cancel_during_tool_execution_keeps_next_turn_valid(
             async for event in stream_agent(
                 "2+3",
                 tool_auth=default_tool_auth(),
+                execution_config=default_execution_config(),
                 llm=model,
                 checkpointer=saver,
                 thread_id="thread-1",
@@ -475,6 +485,7 @@ def test_cancel_during_tool_execution_keeps_next_turn_valid(
         async for _event in stream_agent(
             "next question",
             tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
             llm=model,
             checkpointer=saver,
             thread_id="thread-1",
@@ -508,7 +519,7 @@ def test_http_disconnect_cancels_producer(
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     get_settings.cache_clear()
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_with_key)
-    monkeypatch.setattr("app.agents.graph.create_chat_model", lambda: model)
+    monkeypatch.setattr("app.agents.runtime.create_chat_model_for_agent", lambda **_kwargs: model)
 
     factory = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
 

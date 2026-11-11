@@ -1,6 +1,93 @@
-from functools import lru_cache
+"""Application settings loaded from environment variables / `.env`."""
 
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Process-default convenience: DeepSeek + unset/OpenAI default model → flash.
+_OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
+_DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
+
+# Defaults cover models used in this repo. Override via APPROVED_LLM_MODELS JSON.
+_DEFAULT_APPROVED_LLM_MODELS: list[dict[str, Any]] = [
+    {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "temperature_min": 0.0,
+        "temperature_max": 2.0,
+    },
+    {
+        "provider": "deepseek",
+        "model": "deepseek-flash",
+        "temperature_min": 0.0,
+        "temperature_max": 2.0,
+    },
+    {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "temperature_min": 0.0,
+        "temperature_max": 2.0,
+    },
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovedLlmModel:
+    provider: str
+    model: str
+    temperature_min: float | None
+    temperature_max: float | None
+
+    @property
+    def supports_temperature(self) -> bool:
+        return self.temperature_min is not None and self.temperature_max is not None
+
+
+class ApprovedLlmCatalogError(ValueError):
+    """Configured default LLM is missing from the approved catalog."""
+
+
+def _parse_approved_entry(raw: dict[str, Any]) -> ApprovedLlmModel:
+    provider = str(raw.get("provider", "")).strip().lower()
+    model = str(raw.get("model", "")).strip()
+    if not provider or not model:
+        raise ValueError("approved LLM entry requires provider and model")
+    t_min = raw.get("temperature_min")
+    t_max = raw.get("temperature_max")
+    if t_min is None or t_max is None:
+        return ApprovedLlmModel(
+            provider=provider,
+            model=model,
+            temperature_min=None,
+            temperature_max=None,
+        )
+    return ApprovedLlmModel(
+        provider=provider,
+        model=model,
+        temperature_min=float(t_min),
+        temperature_max=float(t_max),
+    )
+
+
+def _parse_approved_catalog(value: str | list[Any] | None) -> tuple[ApprovedLlmModel, ...]:
+    if value is None or value == "":
+        raw_list: list[Any] = list(_DEFAULT_APPROVED_LLM_MODELS)
+    elif isinstance(value, list):
+        raw_list = value
+    else:
+        loaded = json.loads(value)
+        if not isinstance(loaded, list):
+            raise ValueError("APPROVED_LLM_MODELS must be a JSON array")
+        raw_list = loaded
+    if not raw_list:
+        raise ValueError("APPROVED_LLM_MODELS must not be empty")
+    return tuple(_parse_approved_entry(item) for item in raw_list)
 
 
 class Settings(BaseSettings):
@@ -26,6 +113,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str | None = None
+    # JSON array of {provider, model, temperature_min?, temperature_max?}
+    approved_llm_models: str | list[Any] = ""
     agent_recursion_limit: int = 10
     # Stable id included in LangSmith metadata. One graph exists today.
     agent_id: str = "default"
@@ -39,6 +128,11 @@ class Settings(BaseSettings):
     auth0_audience: str | None = None
     log_level: str = "INFO"
 
+    @field_validator("approved_llm_models", mode="before")
+    @classmethod
+    def _keep_approved_raw(cls, value: Any) -> Any:
+        return value
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
@@ -50,6 +144,44 @@ class Settings(BaseSettings):
         if self.llm_provider.strip().lower() == "deepseek":
             return self.deepseek_api_key
         return None
+
+    def resolve_llm_api_key_for_provider(self, provider: str) -> str | None:
+        """API key for an agent-configured provider (process-wide keys only)."""
+        normalized = provider.strip().lower()
+        if self.llm_api_key:
+            return self.llm_api_key
+        if normalized == "deepseek":
+            return self.deepseek_api_key
+        return None
+
+    def approved_llm_catalog(self) -> tuple[ApprovedLlmModel, ...]:
+        return _parse_approved_catalog(self.approved_llm_models)
+
+    def get_approved_llm(self, provider: str, model: str) -> ApprovedLlmModel | None:
+        provider_key = provider.strip().lower()
+        model_key = model.strip()
+        for entry in self.approved_llm_catalog():
+            if entry.provider == provider_key and entry.model == model_key:
+                return entry
+        return None
+
+    def resolved_process_llm(self) -> tuple[str, str]:
+        """Normalize process LLM settings (DeepSeek OpenAI-default → flash)."""
+        provider = self.llm_provider.strip().lower()
+        model = self.llm_model.strip()
+        if provider == "deepseek" and model == _OPENAI_DEFAULT_MODEL:
+            model = _DEEPSEEK_DEFAULT_MODEL
+        return provider, model
+
+    def default_approved_llm(self) -> ApprovedLlmModel:
+        """Resolved process LLM must be in the catalog — no silent catalog fallback."""
+        provider, model = self.resolved_process_llm()
+        entry = self.get_approved_llm(provider, model)
+        if entry is None:
+            raise ApprovedLlmCatalogError(
+                f"Configured default LLM '{provider}/{model}' is not in APPROVED_LLM_MODELS",
+            )
+        return entry
 
 
 @lru_cache
