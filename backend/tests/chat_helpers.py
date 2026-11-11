@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.agents.tool_policy import ToolAuthContext
+from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.services import agent_access as access_service
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
@@ -9,6 +11,20 @@ from sqlalchemy.orm import Session
 
 USER = "owner"
 OTHER = "intruder"
+
+
+def default_tool_auth(
+    *,
+    user_id: str = USER,
+    agent_id: str = "default",
+    permissions: frozenset[str] | None = None,
+) -> ToolAuthContext:
+    """Trusted tool auth for unit tests that invoke run_agent / stream_agent."""
+    return ToolAuthContext(
+        user_id=user_id,
+        agent_id=agent_id,
+        permissions=(frozenset({PERM_AGENTS_EXECUTE}) if permissions is None else permissions),
+    )
 
 
 def headers(user_id: str = USER) -> dict[str, str]:

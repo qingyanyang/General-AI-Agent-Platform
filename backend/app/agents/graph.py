@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from app.agents.errors import AgentNotConfiguredError
 from app.agents.state import AgentState
+from app.agents.tool_policy import ToolAuthorizationError, get_tool_auth_context
 from app.agents.tools import (
     ToolNotRegisteredError,
     ToolRegistry,
@@ -33,6 +34,8 @@ inflight_node_tasks: ContextVar[set[asyncio.Task[Any]] | None] = ContextVar(
     "inflight_node_tasks",
     default=None,
 )
+
+_AUTH_DENIED_CONTENT = "Error: tool '{name}' is not authorized"
 
 
 def _note_inflight_task() -> None:
@@ -113,6 +116,7 @@ async def _execute_registered_tools(
     if not isinstance(last, AIMessage) or not last.tool_calls:
         return {"messages": []}
 
+    context = get_tool_auth_context()
     outputs: list[ToolMessage] = []
     for tool_call in last.tool_calls:
         name = _tool_call_name(tool_call)
@@ -130,10 +134,25 @@ async def _execute_registered_tools(
             continue
 
         try:
-            result = await registry.aexecute(name, args)
+            result = await registry.aexecute(name, args, context=context)
             outputs.append(
                 ToolMessage(
                     content=str(result),
+                    tool_call_id=call_id,
+                    name=name,
+                )
+            )
+        except ToolAuthorizationError as exc:
+            agent_id = context.agent_id if context is not None else None
+            logger.info(
+                "Tool authorization denied for %s agent_id=%s reason=%s",
+                name,
+                agent_id,
+                exc.reason,
+            )
+            outputs.append(
+                ToolMessage(
+                    content=_AUTH_DENIED_CONTENT.format(name=name),
                     tool_call_id=call_id,
                     name=name,
                 )
@@ -168,8 +187,8 @@ async def _execute_registered_tools(
     return {"messages": outputs}
 
 
-# Production-path cache (llm/registry defaulted). Keyed by checkpointer identity.
-_graph_cache: dict[int | None, CompiledStateGraph] = {}
+# Production-path cache (llm/registry defaulted). Keyed by checkpointer + permitted tools.
+_graph_cache: dict[tuple[int | None, frozenset[str]], CompiledStateGraph] = {}
 
 
 def clear_agent_graph_cache() -> None:
@@ -182,24 +201,34 @@ def build_agent_graph(
     llm: BaseChatModel | None = None,
     registry: ToolRegistry | None = None,
     checkpointer: Any | None = None,
+    permitted_tools: frozenset[str] | None = None,
 ) -> CompiledStateGraph:
     """Compile the agent graph using registry-backed tools only.
 
     Pass ``checkpointer`` for durable multi-turn runs. Omit it for stateless
     single-shot invokes (even when a saver exists on the app).
 
+    ``permitted_tools`` is the model-visible allowlist for this run. ``None`` or
+    empty binds no tools (unbound model — never ``bind_tools([])``). There is
+    no unfiltered full-registry fallback.
+
     When ``llm`` and ``registry`` are omitted, compiled graphs are cached per
-    checkpointer instance for the process lifetime.
+    checkpointer instance and permitted set for the process lifetime.
     """
+    permitted = frozenset(permitted_tools or ())
     use_cache = llm is None and registry is None
-    cache_key: int | None = id(checkpointer) if checkpointer is not None else None
+    cache_key: tuple[int | None, frozenset[str]] = (
+        id(checkpointer) if checkpointer is not None else None,
+        permitted,
+    )
     if use_cache and cache_key in _graph_cache:
         return _graph_cache[cache_key]
 
     tool_registry = registry if registry is not None else create_default_registry()
-    tools = tool_registry.get_langchain_tools()
+    tools = tool_registry.get_langchain_tools(permitted)
     model = llm if llm is not None else create_chat_model()
-    model_with_tools = model.bind_tools(tools)
+    # Providers may reject bind_tools([]); keep unbound model when empty.
+    model_with_tools = model.bind_tools(tools) if tools else model
 
     async def llm_node(state: AgentState) -> dict:
         _note_inflight_task()

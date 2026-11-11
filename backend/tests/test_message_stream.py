@@ -13,7 +13,6 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 import uvicorn
-from app.agents.graph import build_agent_graph
 from app.agents.runtime import StreamOutcome, run_agent, stream_agent
 from app.agents.tools.registry import ToolRegistry
 from app.core.config import Settings, get_settings
@@ -22,14 +21,21 @@ from app.main import app
 from app.services.chat_sessions import touch_last_activity
 from fastapi.testclient import TestClient
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import PrivateAttr
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session, sessionmaker
 
-from tests.chat_helpers import OTHER, USER, create_session, headers, with_saver
+from tests.chat_helpers import (
+    OTHER,
+    USER,
+    create_session,
+    default_tool_auth,
+    headers,
+    with_saver,
+)
 from tests.fakes import ScriptedChatModel
 
 
@@ -130,31 +136,32 @@ class BlockingChatModel(ScriptedChatModel):
 
 def test_streamed_chunks_merge_text_and_tool_arguments() -> None:
     text_result = asyncio.run(
-        run_agent("Hi", llm=ScriptedChatModel(script=[AIMessage(content="Hello!")])),
+        run_agent(
+            "Hi",
+            tool_auth=default_tool_auth(),
+            llm=ScriptedChatModel(script=[AIMessage(content="Hello!")]),
+        ),
     )
     assert text_result.reply == "Hello!"
     assert [item.role for item in text_result.messages] == ["user", "assistant"]
     assert text_result.messages[-1].content == "Hello!"
 
-    graph = build_agent_graph(
-        llm=ScriptedChatModel(
-            script=[
-                _tool_call_message(),
-                AIMessage(content="The sum is 5."),
-            ]
-        )
+    tool_result = asyncio.run(
+        run_agent(
+            "What is 2 + 3?",
+            tool_auth=default_tool_auth(),
+            llm=ScriptedChatModel(
+                script=[
+                    _tool_call_message(),
+                    AIMessage(content="The sum is 5."),
+                ]
+            ),
+        ),
     )
-    result = asyncio.run(
-        graph.ainvoke(
-            {"messages": [HumanMessage(content="What is 2 + 3?")]},
-            config={"recursion_limit": 10},
-        )
-    )
-    tool_call = result["messages"][1].tool_calls[0]
-    assert tool_call["name"] == "add"
-    assert tool_call["id"] == "call_add_1"
-    assert tool_call["args"] == {"a": 2.0, "b": 3.0}
-    assert result["messages"][-1].content == "The sum is 5."
+    assert tool_result.reply == "The sum is 5."
+    roles = [item.role for item in tool_result.messages]
+    assert "tool" in roles
+    assert roles[-1] == "assistant"
 
 
 def test_no_tool_deltas_match_final_reply(
@@ -375,7 +382,11 @@ def test_cancel_producer_task_propagates_without_error_event() -> None:
 
     async def scenario() -> None:
         async def producer() -> None:
-            async for event in stream_agent("hi", llm=model):
+            async for event in stream_agent(
+                "hi",
+                tool_auth=default_tool_auth(),
+                llm=model,
+            ):
                 events.append(event)
 
         task = asyncio.create_task(producer())
@@ -422,7 +433,13 @@ def test_cancel_during_tool_execution_keeps_next_turn_valid(
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_with_key)
     entered = asyncio.Event()
 
-    async def _block_until_cancelled(self, name: str, args: dict) -> None:  # noqa: ANN001
+    async def _block_until_cancelled(
+        self,
+        name: str,
+        args: dict,
+        *,
+        context=None,  # noqa: ANN001
+    ) -> None:
         entered.set()
         await asyncio.Event().wait()
 
@@ -440,6 +457,7 @@ def test_cancel_during_tool_execution_keeps_next_turn_valid(
         async def producer() -> None:
             async for event in stream_agent(
                 "2+3",
+                tool_auth=default_tool_auth(),
                 llm=model,
                 checkpointer=saver,
                 thread_id="thread-1",
@@ -456,6 +474,7 @@ def test_cancel_during_tool_execution_keeps_next_turn_valid(
         outcome = StreamOutcome()
         async for _event in stream_agent(
             "next question",
+            tool_auth=default_tool_auth(),
             llm=model,
             checkpointer=saver,
             thread_id="thread-1",

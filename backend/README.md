@@ -299,9 +299,19 @@ pytest -m integration
 
 `POST /agents/run` returns `execution_id`. That id is the LangSmith root run id. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`.
 
-### Tool registry
+### Tool registry and authorization
 
-Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`.
+Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`. Each registration declares `required_permissions` (built-ins require `agents:execute`).
+
+**Authorization (#18)** is separate from agent access grants (#17):
+
+- A code/config allowlist maps `agent_id` → permitted tool names (`default` gets all built-ins; `reporting` is a strict subset for tests). Unknown agents get an empty set (fail closed).
+- Public runners (`run_agent` / `stream_agent`) require a trusted `ToolAuthContext` (`user_id`, `permissions`, `agent_id`) from the API — never from the model.
+- The model only sees the permitted intersection (allowlist ∩ registry ∩ user permissions). An empty set uses an unbound model (no `bind_tools([])`). There is no full-registry fallback.
+- `registry.aexecute(..., context=None)` is the sole execution-time authz boundary; omitted context raises `ToolAuthorizationError` (not `TypeError`). The tools node maps denials to controlled `ToolMessage`s.
+- Auth context is bound on a non-persisted `ContextVar` inside the graph consumer / stream producer (`try`/`finally`). It is not written to checkpoints or LangSmith metadata/`configurable`.
+
+The same policy applies to JSON session messages, SSE streams, and `POST /agents/run`.
 
 ## Quality
 

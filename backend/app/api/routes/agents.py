@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import run_agent
+from app.agents.tool_policy import ToolAuthContext
 from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
@@ -91,7 +92,12 @@ async def agents_run(
                     user_id=user.user_id,
                     agent_id=agent_id,
                 )
-            result = await run_agent(body.message)
+            tool_auth = ToolAuthContext(
+                user_id=user.user_id,
+                permissions=user.permissions,
+                agent_id=agent_id,
+            )
+            result = await run_agent(body.message, tool_auth=tool_auth)
         else:
             checkpointer = getattr(request.app.state, "checkpointer", None)
             if checkpointer is None:
@@ -111,8 +117,15 @@ async def agents_run(
                     agent_id=chat_session.agent_id,
                 )
                 thread_id = thread_id_for_session(chat_session.id)
+                agent_id = chat_session.agent_id
+            tool_auth = ToolAuthContext(
+                user_id=user.user_id,
+                permissions=user.permissions,
+                agent_id=agent_id,
+            )
             result = await run_agent(
                 body.message,
+                tool_auth=tool_auth,
                 checkpointer=checkpointer,
                 thread_id=thread_id,
             )

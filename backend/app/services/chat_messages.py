@@ -13,6 +13,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.messages import normalize_message_views
 from app.agents.runtime import StreamOutcome, run_agent, stream_agent
+from app.agents.tool_policy import ToolAuthContext
 from app.schemas.chat_message import ChatMessageOut, StreamEvent
 
 
@@ -46,12 +47,14 @@ async def post_user_message(
     content: str,
     checkpointer: BaseCheckpointSaver,
     session_id: uuid.UUID,
+    tool_auth: ToolAuthContext,
     llm: BaseChatModel | None = None,
 ) -> tuple[str, ChatMessageOut]:
     """Run a durable agent turn for the session; return execution_id and assistant message."""
     thread_id = thread_id_for_session(session_id)
     result = await run_agent(
         content,
+        tool_auth=tool_auth,
         llm=llm,
         checkpointer=checkpointer,
         thread_id=thread_id,
@@ -64,6 +67,7 @@ async def stream_user_message(
     content: str,
     checkpointer: BaseCheckpointSaver,
     session_id: uuid.UUID,
+    tool_auth: ToolAuthContext,
     outcome: StreamOutcome,
     llm: BaseChatModel | None = None,
 ) -> AsyncIterator[StreamEvent]:
@@ -71,6 +75,7 @@ async def stream_user_message(
     thread_id = thread_id_for_session(session_id)
     async for event in stream_agent(
         content,
+        tool_auth=tool_auth,
         llm=llm,
         checkpointer=checkpointer,
         thread_id=thread_id,
