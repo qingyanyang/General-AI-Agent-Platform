@@ -142,8 +142,14 @@ async def _execute_registered_tools(
                     name=name,
                 )
             )
-        except ToolAuthorizationError:
-            logger.info("Tool authorization denied for %s", name)
+        except ToolAuthorizationError as exc:
+            agent_id = context.agent_id if context is not None else None
+            logger.info(
+                "Tool authorization denied for %s agent_id=%s reason=%s",
+                name,
+                agent_id,
+                exc.reason,
+            )
             outputs.append(
                 ToolMessage(
                     content=_AUTH_DENIED_CONTENT.format(name=name),

@@ -50,6 +50,12 @@ def test_duplicate_registration_rejected() -> None:
         registry.register(add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
 
 
+def test_empty_required_permissions_rejected() -> None:
+    registry = ToolRegistry()
+    with pytest.raises(ToolRegistryError, match="non-empty required_permissions"):
+        registry.register(add, required_permissions=frozenset())
+
+
 def test_registered_tools_expose_input_schemas() -> None:
     registry = create_default_registry()
     metadata = {item.name: item for item in registry.list()}

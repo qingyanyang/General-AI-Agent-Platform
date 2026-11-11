@@ -45,10 +45,15 @@ class ToolRegistry:
         name = tool.name
         if not name:
             raise ToolRegistryError("Tool must have a non-empty name")
+        perms = frozenset(required_permissions)
+        if not perms:
+            raise ToolRegistryError(
+                "Tool must declare a non-empty required_permissions set",
+            )
         if name in self._tools:
             raise ToolRegistryError(f"Tool already registered: {name}")
         self._tools[name] = tool
-        self._required_permissions[name] = frozenset(required_permissions)
+        self._required_permissions[name] = perms
 
     def get(self, name: str) -> BaseTool:
         try:

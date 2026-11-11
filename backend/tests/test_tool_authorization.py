@@ -109,6 +109,30 @@ def test_aexecute_denies_without_invoking_tool() -> None:
     assert calls == []
 
 
+def test_aexecute_denies_missing_permissions_without_invoking_tool() -> None:
+    """Allowlisted tool still denied when caller lacks required_permissions."""
+    calls: list[tuple[float, float]] = []
+
+    @tool("add")
+    def tracked_add(a: float, b: float) -> float:
+        """Add two numbers."""
+        calls.append((a, b))
+        return a + b
+
+    registry = ToolRegistry()
+    registry.register(tracked_add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
+
+    with pytest.raises(ToolAuthorizationError, match="missing permissions"):
+        asyncio.run(
+            registry.aexecute(
+                "add",
+                {"a": 1, "b": 2},
+                context=default_tool_auth(permissions=frozenset({PERM_AGENTS_READ})),
+            ),
+        )
+    assert calls == []
+
+
 def test_aexecute_none_context_is_authorization_error_not_type_error() -> None:
     registry = create_default_registry()
     with pytest.raises(ToolAuthorizationError, match="missing context"):
