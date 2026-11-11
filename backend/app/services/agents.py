@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -14,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import USER_ID_MAX_LENGTH
 from app.models.agent import Agent, AgentStatus
-from app.models.agent_access_grant import AgentAccessGrant
 from app.schemas.agent import AgentStatusFilter
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 from app.services import agent_access as access_service
@@ -141,22 +139,21 @@ def create_agent(
     db.add(agent)
     try:
         db.flush()
-        # Creator auto-grant: view + configure + execute (same transaction).
-        grant = AgentAccessGrant(
-            id=uuid.uuid4(),
+    except IntegrityError as exc:
+        # Only agent PK conflicts map to "already exists".
+        db.rollback()
+        raise AgentConflictError from exc
+
+    try:
+        # Upsert so pre-existing (orphan) grants become the full creator grant.
+        access_service.upsert_grant(
+            db,
             user_id=created_by,
             agent_id=agent_id,
             can_view=True,
             can_configure=True,
             can_execute=True,
-            created_at=now,
-            updated_at=now,
         )
-        db.add(grant)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise AgentConflictError from exc
     except Exception:
         db.rollback()
         raise

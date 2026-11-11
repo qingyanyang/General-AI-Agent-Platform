@@ -23,6 +23,7 @@ from app.core.permissions import (
     PERM_AGENTS_EXECUTE,
     PERM_AGENTS_READ,
 )
+from app.models.agent import Agent, AgentStatus
 from app.schemas.agent import (
     AgentCreate,
     AgentListOut,
@@ -81,13 +82,12 @@ def _http_agent_not_found() -> HTTPException:
     )
 
 
-def _ensure_active_agent(db: Session, agent_id: str) -> None:
+def _require_agent(db: Session, agent_id: str) -> Agent:
+    """Load agent; missing/invalid id → 404."""
     try:
-        agent_service.require_active_agent(db, agent_id)
-    except agent_service.AgentNotFoundError as exc:
+        return agent_service.require_agent(db, agent_id)
+    except (agent_service.AgentNotFoundError, agent_service.AgentValidationError) as exc:
         raise _http_agent_not_found() from exc
-    except agent_service.AgentInactiveError as exc:
-        raise _http_inactive() from exc
 
 
 def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
@@ -112,12 +112,18 @@ def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
     )
 
 
+def _ensure_executable_agent(db: Session, *, user_id: str, agent_id: str) -> bool:
+    """404 missing → 403 no execute → 409 inactive. Returns whether caller has view."""
+    agent = _require_agent(db, agent_id)
+    include_history = _ensure_execute(db, user_id=user_id, agent_id=agent_id)
+    if agent.status != AgentStatus.ACTIVE.value:
+        raise _http_inactive()
+    return include_history
+
+
 def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> None:
-    # Unknown agent → 404 first (catalog non-disclosure for configure ops that need existence).
-    try:
-        agent_service.require_agent(db, agent_id)
-    except agent_service.AgentNotFoundError as exc:
-        raise _http_agent_not_found() from exc
+    # Unknown/invalid agent → 404 first (catalog non-disclosure).
+    _require_agent(db, agent_id)
     try:
         access_service.ensure_agent_capability(
             db,
@@ -201,8 +207,7 @@ async def agents_run(
         if body.session_id is None:
             agent_id = get_settings().agent_id
             with _db_session(request) as db:
-                _ensure_active_agent(db, agent_id)
-                include_history = _ensure_execute(
+                include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
@@ -227,8 +232,7 @@ async def agents_run(
                     session_id=body.session_id,
                 )
                 agent_id = chat_session.agent_id
-                _ensure_active_agent(db, agent_id)
-                include_history = _ensure_execute(
+                include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
@@ -282,10 +286,7 @@ def get_agent(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentOut:
-    try:
-        agent = agent_service.require_agent(db, agent_id)
-    except (agent_service.AgentNotFoundError, agent_service.AgentValidationError) as exc:
-        raise _http_agent_not_found() from exc
+    agent = _require_agent(db, agent_id)
     if not access_service.user_has_capability(
         db,
         user_id=user.user_id,

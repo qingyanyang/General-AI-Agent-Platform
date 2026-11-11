@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,6 +16,7 @@ from app.core.config import Settings, get_settings
 from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
 from app.models.agent import Agent
 from app.models.agent_access_grant import AgentAccessGrant
+from app.services import agent_access as access_service
 from app.services import agents as agent_service
 from app.services.agents import INACTIVE_AGENT_DETAIL
 from fastapi import Request
@@ -238,19 +241,15 @@ def test_update_without_configure_is_403(
     assert response.status_code == 403
 
 
-def test_create_rolls_back_agent_if_grant_insert_fails(
+def test_create_rolls_back_agent_if_grant_upsert_fails(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    original_add = db_session.add
+    def boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("grant upsert failed")
 
-    def flaky_add(obj):  # noqa: ANN001
-        if isinstance(obj, AgentAccessGrant):
-            raise RuntimeError("grant insert failed")
-        return original_add(obj)
-
-    monkeypatch.setattr(db_session, "add", flaky_add)
-    with pytest.raises(RuntimeError, match="grant insert failed"):
+    monkeypatch.setattr(access_service, "upsert_grant", boom)
+    with pytest.raises(RuntimeError, match="grant upsert failed"):
         agent_service.create_agent(
             db_session,
             agent_id="tx-fail",
@@ -259,6 +258,118 @@ def test_create_rolls_back_agent_if_grant_insert_fails(
             created_by=USER,
         )
     assert db_session.get(Agent, "tx-fail") is None
+
+
+def test_create_upserts_preexisting_orphan_grant(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    """Pre-#19 orphan grants must not block create or leave a stuck 409."""
+    now = datetime.now(UTC)
+    db_session.add(
+        AgentAccessGrant(
+            id=uuid.uuid4(),
+            user_id=USER,
+            agent_id="legacy",
+            can_view=True,
+            can_configure=False,
+            can_execute=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.commit()
+
+    seed_agent_grant(db_session, USER, "default", can_configure=True)
+    created = api_client.post(
+        "/agents",
+        json={"id": "legacy", "name": "Legacy"},
+        headers=_configure_headers(),
+    )
+    assert created.status_code == 201, created.text
+    grant = access_service.get_grant(db_session, user_id=USER, agent_id="legacy")
+    assert grant is not None
+    assert grant.can_view is True
+    assert grant.can_configure is True
+    assert grant.can_execute is True
+
+
+def test_inactive_without_execute_is_403_not_409(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    seed_agent(db_session, "quiet", status="inactive")
+    denied = api_client.post(
+        "/sessions",
+        json={"agent_id": "quiet"},
+        headers=headers(),
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Agent access denied"
+
+
+def test_owned_session_missing_execute_inactive_is_403(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    created = create_session(
+        api_client,
+        db_session,
+        agent_id="later-quiet",
+        can_view=True,
+        can_configure=True,
+        can_execute=True,
+    )
+    api_client.post("/agents/later-quiet/deactivate", headers=_configure_headers())
+    access_service.upsert_grant(
+        db_session,
+        user_id=USER,
+        agent_id="later-quiet",
+        can_view=True,
+        can_configure=True,
+        can_execute=False,
+    )
+    with_saver(api_client)
+    denied = api_client.post(
+        f"/sessions/{created['id']}/messages",
+        json={"content": "hi"},
+        headers=headers(),
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Agent access denied"
+
+
+def test_patch_oversized_agent_id_is_404_not_500(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    seed_agent_grant(db_session, USER, "default", can_configure=True)
+    oversized = "x" * 65
+    response = api_client.patch(
+        f"/agents/{oversized}",
+        json={"name": "Nope"},
+        headers=_configure_headers(),
+    )
+    assert response.status_code == 404
+
+
+def test_patch_blank_description_clears_to_null(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    seed_agent_grant(db_session, USER, "default", can_configure=True)
+    api_client.post(
+        "/agents",
+        json={"id": "desc", "name": "Desc", "description": "keep"},
+        headers=_configure_headers(),
+    )
+    cleared = api_client.patch(
+        "/agents/desc",
+        json={"description": "  "},
+        headers=_configure_headers(),
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["description"] is None
 
 
 def _use_model(monkeypatch: MonkeyPatch, model: ScriptedChatModel) -> None:

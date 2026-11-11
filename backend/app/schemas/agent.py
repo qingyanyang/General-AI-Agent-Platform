@@ -80,7 +80,8 @@ class AgentUpdate(BaseModel):
     def strip_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return value.strip()
+        stripped = value.strip()
+        return stripped or None
 
 
 class AgentOut(BaseModel):
