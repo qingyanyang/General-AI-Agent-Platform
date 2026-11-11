@@ -79,10 +79,20 @@ def test_run_records_execution_id_without_secrets_in_metadata(
                 ]
             }
 
+    def _forbid_real_chat_model(**_kwargs: object) -> object:
+        raise AssertionError(
+            "create_chat_model_for_agent must not run; pass llm= in this unit test",
+        )
+
     monkeypatch.setattr("app.agents.runtime.get_settings", lambda: settings)
     monkeypatch.setattr("app.agents.runtime.build_agent_graph", lambda **kwargs: _Graph())
+    monkeypatch.setattr(
+        "app.agents.runtime.create_chat_model_for_agent",
+        _forbid_real_chat_model,
+    )
     monkeypatch.setenv("LANGSMITH_PROJECT", "ambient-project")
 
+    # Inject llm so run_agent never builds a real ChatOpenAI (no ambient API keys).
     result = asyncio.run(
         run_agent(
             "account number 999 and ls-secret-key",
