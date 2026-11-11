@@ -47,7 +47,6 @@ def _note_inflight_task() -> None:
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
-OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 
 
 def create_chat_model_for_agent(
@@ -94,11 +93,7 @@ def create_chat_model_for_agent(
 def create_chat_model() -> ChatOpenAI:
     """Build an OpenAI-compatible chat model from process settings (legacy/tests)."""
     settings = get_settings()
-    provider = settings.llm_provider
-    model = settings.llm_model
-    # Preserve prior DeepSeek convenience: unset/OpenAI-default model → flash.
-    if provider.strip().lower() == "deepseek" and model == OPENAI_DEFAULT_MODEL:
-        model = DEEPSEEK_DEFAULT_MODEL
+    provider, model = settings.resolved_process_llm()
     return create_chat_model_for_agent(
         provider=provider,
         model=model,

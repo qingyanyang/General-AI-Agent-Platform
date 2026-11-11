@@ -10,6 +10,10 @@ from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Process-default convenience: DeepSeek + unset/OpenAI default model → flash.
+_OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
+_DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
+
 # Defaults cover models used in this repo. Override via APPROVED_LLM_MODELS JSON.
 _DEFAULT_APPROVED_LLM_MODELS: list[dict[str, Any]] = [
     {
@@ -161,13 +165,21 @@ class Settings(BaseSettings):
                 return entry
         return None
 
+    def resolved_process_llm(self) -> tuple[str, str]:
+        """Normalize process LLM settings (DeepSeek OpenAI-default → flash)."""
+        provider = self.llm_provider.strip().lower()
+        model = self.llm_model.strip()
+        if provider == "deepseek" and model == _OPENAI_DEFAULT_MODEL:
+            model = _DEEPSEEK_DEFAULT_MODEL
+        return provider, model
+
     def default_approved_llm(self) -> ApprovedLlmModel:
-        """Settings llm_provider/llm_model must be in the catalog — no silent fallback."""
-        entry = self.get_approved_llm(self.llm_provider, self.llm_model)
+        """Resolved process LLM must be in the catalog — no silent catalog fallback."""
+        provider, model = self.resolved_process_llm()
+        entry = self.get_approved_llm(provider, model)
         if entry is None:
             raise ApprovedLlmCatalogError(
-                f"Configured default LLM '{self.llm_provider}/{self.llm_model}' "
-                "is not in APPROVED_LLM_MODELS",
+                f"Configured default LLM '{provider}/{model}' is not in APPROVED_LLM_MODELS",
             )
         return entry
 

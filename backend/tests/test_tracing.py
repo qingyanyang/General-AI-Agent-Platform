@@ -88,6 +88,7 @@ def test_run_records_execution_id_without_secrets_in_metadata(
             "account number 999 and ls-secret-key",
             tool_auth=default_tool_auth(),
             execution_config=default_execution_config(),
+            llm=ScriptedChatModel(script=[]),
         )
     )
 

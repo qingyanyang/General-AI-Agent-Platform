@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import run_agent
-from app.agents.tool_policy import ToolAuthContext
 from app.api.deps import require_permissions
+from app.api.execution import execution_bundle
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -35,7 +35,6 @@ from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
 from app.services import agent_access as access_service
 from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
-from app.services.agents import AgentExecutionConfig
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -146,30 +145,6 @@ def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> Agent:
     return agent
 
 
-def _execution_bundle(
-    agent: Agent,
-    *,
-    user_id: str,
-    permissions: frozenset[str],
-) -> tuple[AgentExecutionConfig, ToolAuthContext]:
-    """Snapshot + validate config, then build tool auth (no further DB reads)."""
-    execution_config = agent_service.snapshot_execution_config(agent)
-    try:
-        agent_service.validate_execution_config(execution_config)
-    except AgentNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    tool_auth = ToolAuthContext(
-        user_id=user_id,
-        permissions=permissions,
-        agent_id=agent.id,
-        allowed_tools=frozenset(execution_config.tool_names),
-    )
-    return execution_config, tool_auth
-
-
 def _configuration_out(agent: Agent) -> AgentConfigurationOut:
     return AgentConfigurationOut(
         system_prompt=agent.system_prompt or "",
@@ -254,7 +229,7 @@ async def agents_run(
                     user_id=user.user_id,
                     agent_id=agent_id,
                 )
-                execution_config, tool_auth = _execution_bundle(
+                execution_config, tool_auth = execution_bundle(
                     agent,
                     user_id=user.user_id,
                     permissions=user.permissions,
@@ -283,7 +258,7 @@ async def agents_run(
                     user_id=user.user_id,
                     agent_id=agent_id,
                 )
-                execution_config, tool_auth = _execution_bundle(
+                execution_config, tool_auth = execution_bundle(
                     agent,
                     user_id=user.user_id,
                     permissions=user.permissions,

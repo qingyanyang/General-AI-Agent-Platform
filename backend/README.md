@@ -315,7 +315,7 @@ pytest -m integration
 | `LLM_PROVIDER` | `openai` | Process default provider; must be in `APPROVED_LLM_MODELS` with `LLM_MODEL` (no silent fallback) |
 | `LLM_API_KEY` | unset | Primary key for live agent runs (process-wide; not stored per agent) |
 | `DEEPSEEK_API_KEY` | unset | Optional DeepSeek key if `LLM_API_KEY` is unset |
-| `LLM_MODEL` | `gpt-4o-mini` | Process default model; DeepSeek convenience remaps OpenAI default → `deepseek-flash` for legacy `create_chat_model` only |
+| `LLM_MODEL` | `gpt-4o-mini` | Process default model; DeepSeek + this OpenAI default remaps to `deepseek-flash` for create defaults and legacy `create_chat_model` |
 | `LLM_BASE_URL` | unset | OpenAI-compatible base URL; DeepSeek defaults to `https://api.deepseek.com` |
 | `APPROVED_LLM_MODELS` | built-in JSON catalog | JSON array of `{provider, model, temperature_min?, temperature_max?}`; PUT configuration and create defaults must match |
 | `AGENT_RECURSION_LIMIT` | `10` | LangGraph recursion limit (tool-loop guard) |

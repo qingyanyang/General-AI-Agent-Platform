@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import StreamOutcome
-from app.agents.tool_policy import ToolAuthContext
 from app.api.deps import require_permissions
+from app.api.execution import execution_bundle
 from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
 from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
@@ -39,7 +39,6 @@ from app.services import agent_access as access_service
 from app.services import agents as agent_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
-from app.services.agents import AgentExecutionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -104,30 +103,6 @@ def _ensure_executable_agent(
             detail=agent_service.INACTIVE_AGENT_DETAIL,
         )
     return agent
-
-
-def _execution_bundle(
-    agent: Agent,
-    *,
-    user_id: str,
-    permissions: frozenset[str],
-) -> tuple[AgentExecutionConfig, ToolAuthContext]:
-    """Snapshot + validate config before closing the DB session."""
-    execution_config = agent_service.snapshot_execution_config(agent)
-    try:
-        agent_service.validate_execution_config(execution_config)
-    except AgentNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    tool_auth = ToolAuthContext(
-        user_id=user_id,
-        permissions=permissions,
-        agent_id=agent.id,
-        allowed_tools=frozenset(execution_config.tool_names),
-    )
-    return execution_config, tool_auth
 
 
 @contextmanager
@@ -285,7 +260,7 @@ async def create_message(
             agent_id=chat_session.agent_id,
         )
         owned_session_id = chat_session.id
-        execution_config, tool_auth = _execution_bundle(
+        execution_config, tool_auth = execution_bundle(
             agent,
             user_id=user.user_id,
             permissions=user.permissions,
@@ -361,7 +336,7 @@ async def stream_message(
         )
         owned_session_id = chat_session.id
         # Preflight before StreamingResponse so config failures are HTTP 503.
-        execution_config, tool_auth = _execution_bundle(
+        execution_config, tool_auth = execution_bundle(
             agent,
             user_id=user.user_id,
             permissions=user.permissions,
