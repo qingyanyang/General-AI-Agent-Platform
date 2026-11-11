@@ -19,6 +19,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.auth import USER_ID_MAX_LENGTH
+from app.models.agent import Agent
 from app.models.agent_access_grant import AgentAccessGrant
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 
@@ -144,9 +145,14 @@ def upsert_grant(
     can_configure: bool,
     can_execute: bool,
 ) -> AgentAccessGrant | None:
-    """Replace the grant for (user_id, agent_id). All-false deletes the row."""
+    """Replace the grant for (user_id, agent_id). All-false deletes the row.
+
+    The agent row must exist (active or inactive). Unknown agent_id is rejected.
+    """
     user_id = validate_grant_user_id(user_id)
     agent_id = validate_grant_agent_id(agent_id)
+    if db.get(Agent, agent_id) is None:
+        raise AgentAccessValidationError("Unknown agent_id")
 
     if not can_view and not can_configure and not can_execute:
         revoke_grant(db, user_id=user_id, agent_id=agent_id, missing_ok=True)

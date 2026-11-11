@@ -17,7 +17,14 @@ from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from tests.chat_helpers import OTHER, USER, headers, seed_agent_grant, with_saver
+from tests.chat_helpers import (
+    OTHER,
+    USER,
+    headers,
+    seed_agent,
+    seed_agent_grant,
+    with_saver,
+)
 from tests.fakes import ScriptedChatModel
 
 ADMIN = "admin-user"
@@ -33,6 +40,7 @@ def test_upsert_and_revoke_grant(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
+    seed_agent(db_session, REPORTING)
     put = api_client.put(
         "/agent-access/grants",
         json={
@@ -152,6 +160,8 @@ def test_reporting_vs_finance_isolation(
     db_session: Session,
 ) -> None:
     seed_agent_grant(db_session, USER, REPORTING)
+    # Agent must exist so missing execute grant is 403 (not catalog 404).
+    seed_agent(db_session, FINANCE)
     created = api_client.post(
         "/sessions",
         json={"agent_id": REPORTING},
@@ -430,6 +440,7 @@ def test_json_and_sse_execute_only_do_not_replay_prior_message_objects(
 
 
 def test_atomic_upsert_replaces_capabilities(db_session: Session) -> None:
+    seed_agent(db_session, REPORTING)
     first = access_service.upsert_grant(
         db_session,
         user_id=USER,

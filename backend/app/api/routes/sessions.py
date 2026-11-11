@@ -35,6 +35,7 @@ from app.schemas.chat_session import (
     ChatSessionOut,
 )
 from app.services import agent_access as access_service
+from app.services import agents as agent_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
 
@@ -50,6 +51,22 @@ def _deny_agent_access() -> HTTPException:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=_AGENT_ACCESS_DENIED,
     )
+
+
+def _ensure_active_agent(db: Session, agent_id: str) -> None:
+    """Block new executions when the agent is missing or inactive."""
+    try:
+        agent_service.require_active_agent(db, agent_id)
+    except agent_service.AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        ) from exc
+    except agent_service.AgentInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=agent_service.INACTIVE_AGENT_DETAIL,
+        ) from exc
 
 
 def _ensure_capability(
@@ -88,6 +105,7 @@ def create_session(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
+    _ensure_active_agent(db, body.agent_id)
     _ensure_capability(
         db,
         user_id=user.user_id,
@@ -223,6 +241,7 @@ async def create_message(
             user_id=user.user_id,
             session_id=session_id,
         )
+        _ensure_active_agent(db, chat_session.agent_id)
         _ensure_capability(
             db,
             user_id=user.user_id,
@@ -298,6 +317,7 @@ async def stream_message(
             user_id=user.user_id,
             session_id=session_id,
         )
+        _ensure_active_agent(db, chat_session.agent_id)
         _ensure_capability(
             db,
             user_id=user.user_id,
