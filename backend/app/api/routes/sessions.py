@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import StreamOutcome, ensure_llm_configured
+from app.agents.tool_policy import ToolAuthContext
 from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
@@ -229,12 +230,18 @@ async def create_message(
             capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
+        tool_auth = ToolAuthContext(
+            user_id=user.user_id,
+            permissions=user.permissions,
+            agent_id=chat_session.agent_id,
+        )
 
     try:
         execution_id, message = await message_service.post_user_message(
             content=body.content,
             checkpointer=checkpointer,
             session_id=owned_session_id,
+            tool_auth=tool_auth,
         )
     except AgentNotConfiguredError as exc:
         raise HTTPException(
@@ -298,6 +305,11 @@ async def stream_message(
             capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
+        tool_auth = ToolAuthContext(
+            user_id=user.user_id,
+            permissions=user.permissions,
+            agent_id=chat_session.agent_id,
+        )
     try:
         ensure_llm_configured()
     except AgentNotConfiguredError as exc:
@@ -317,6 +329,7 @@ async def stream_message(
                     content=body.content,
                     checkpointer=checkpointer,
                     session_id=owned_session_id,
+                    tool_auth=tool_auth,
                     outcome=outcome,
                 ):
                     queue.put_nowait(event)

@@ -15,6 +15,7 @@ from app.core.config import Settings
 from langchain_core.messages import AIMessage, HumanMessage
 from pytest import LogCaptureFixture, MonkeyPatch
 
+from tests.chat_helpers import default_tool_auth
 from tests.fakes import ScriptedChatModel
 
 
@@ -82,7 +83,9 @@ def test_run_records_execution_id_without_secrets_in_metadata(
     monkeypatch.setattr("app.agents.runtime.build_agent_graph", lambda **kwargs: _Graph())
     monkeypatch.setenv("LANGSMITH_PROJECT", "ambient-project")
 
-    result = asyncio.run(run_agent("account number 999 and ls-secret-key"))
+    result = asyncio.run(
+        run_agent("account number 999 and ls-secret-key", tool_auth=default_tool_auth())
+    )
 
     config = captured["config"]
     assert result.reply == "done"
@@ -107,7 +110,7 @@ def test_agent_runs_when_tracing_disabled(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("app.agents.runtime.get_settings", lambda: settings)
     llm = ScriptedChatModel(script=[AIMessage(content="Hello!")])
 
-    result = asyncio.run(run_agent("Hi", llm=llm))
+    result = asyncio.run(run_agent("Hi", tool_auth=default_tool_auth(), llm=llm))
 
     assert result.reply == "Hello!"
     assert result.execution_id
@@ -134,7 +137,7 @@ def test_agent_runs_when_tracing_requested_without_api_key(
     llm = ScriptedChatModel(script=[AIMessage(content="unused")])
 
     with caplog.at_level(logging.WARNING):
-        result = asyncio.run(run_agent("Hi", llm=llm))
+        result = asyncio.run(run_agent("Hi", tool_auth=default_tool_auth(), llm=llm))
 
     assert result.reply == "still works"
     assert seen["tracing"] == "false"
@@ -158,7 +161,9 @@ def test_failed_invoke_returns_the_same_execution_id(monkeypatch: MonkeyPatch) -
     monkeypatch.setattr("app.agents.runtime.build_agent_graph", lambda **kwargs: _Graph())
 
     with pytest.raises(AgentExecutionError, match="^Agent execution failed$") as exc_info:
-        asyncio.run(run_agent("Hi", llm=ScriptedChatModel(script=[])))
+        asyncio.run(
+            run_agent("Hi", tool_auth=default_tool_auth(), llm=ScriptedChatModel(script=[]))
+        )
 
     assert exc_info.value.execution_id == str(captured["run_id"])
     assert "boom" not in str(exc_info.value)
@@ -180,7 +185,7 @@ def test_agent_runs_when_langsmith_client_raises(monkeypatch: MonkeyPatch) -> No
     monkeypatch.setattr("langsmith.Client.__init__", _unavailable)
     llm = ScriptedChatModel(script=[AIMessage(content="Hello!")])
 
-    result = asyncio.run(run_agent("Hi", llm=llm))
+    result = asyncio.run(run_agent("Hi", tool_auth=default_tool_auth(), llm=llm))
 
     # Run must succeed even if LangSmith client construction fails when attempted.
     assert result.reply == "Hello!"

@@ -6,6 +6,15 @@ import asyncio
 
 import pytest
 from app.agents.graph import build_agent_graph
+from app.agents.runtime import run_agent
+from app.agents.tool_policy import (
+    AGENT_TOOL_ALLOWLIST,
+    BUILTIN_REQUIRED_PERMISSIONS,
+    BUILTIN_TOOL_NAMES,
+    ToolAuthorizationError,
+    reset_tool_auth_context,
+    set_tool_auth_context,
+)
 from app.agents.tools import (
     ToolNotRegisteredError,
     ToolRegistry,
@@ -13,19 +22,20 @@ from app.agents.tools import (
     ToolValidationError,
     add,
     create_default_registry,
-    echo,
     multiply,
 )
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
+from pytest import MonkeyPatch
 
+from tests.chat_helpers import default_tool_auth
 from tests.fakes import ScriptedChatModel
 
 
 def test_register_and_retrieve_tools() -> None:
     registry = ToolRegistry()
-    registry.register(add)
-    registry.register(multiply)
+    registry.register(add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
+    registry.register(multiply, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
 
     assert registry.has("add")
     assert registry.get("add") is add
@@ -35,9 +45,9 @@ def test_register_and_retrieve_tools() -> None:
 
 def test_duplicate_registration_rejected() -> None:
     registry = ToolRegistry()
-    registry.register(add)
+    registry.register(add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
     with pytest.raises(ToolRegistryError, match="already registered"):
-        registry.register(add)
+        registry.register(add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
 
 
 def test_registered_tools_expose_input_schemas() -> None:
@@ -56,16 +66,25 @@ def test_registered_tools_expose_input_schemas() -> None:
 
 def test_invalid_tool_arguments_raise_validation_error() -> None:
     registry = create_default_registry()
+    auth = default_tool_auth()
 
     with pytest.raises(ToolValidationError, match="valid number|validation"):
-        asyncio.run(registry.aexecute("add", {"a": "not-a-float"}))
+        asyncio.run(registry.aexecute("add", {"a": "not-a-float"}, context=auth))
 
 
 def test_unregistered_tool_cannot_be_executed() -> None:
     registry = create_default_registry()
+    auth = default_tool_auth()
 
     with pytest.raises(ToolNotRegisteredError, match="not registered"):
-        asyncio.run(registry.aexecute("drop_database", {"confirm": True}))
+        asyncio.run(registry.aexecute("drop_database", {"confirm": True}, context=auth))
+
+
+def test_omitted_context_raises_authorization_error_not_type_error() -> None:
+    registry = create_default_registry()
+
+    with pytest.raises(ToolAuthorizationError, match="missing context"):
+        asyncio.run(registry.aexecute("add", {"a": 1, "b": 2}))
 
 
 def test_default_registry_includes_builtins() -> None:
@@ -91,19 +110,17 @@ def test_langgraph_invokes_registered_tool() -> None:
             AIMessage(content="The product is 3973."),
         ]
     )
-    graph = build_agent_graph(llm=llm, registry=create_default_registry())
-    result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="What is 137 * 29?")]}))
-    messages = result["messages"]
-    roles = [msg.type for msg in messages]
+    result = asyncio.run(
+        run_agent("What is 137 * 29?", tool_auth=default_tool_auth(), llm=llm),
+    )
+    roles = [item.role for item in result.messages]
     assert "tool" in roles
-    tool_msg = next(msg for msg in messages if msg.type == "tool")
+    tool_msg = next(item for item in result.messages if item.role == "tool")
     assert tool_msg.content == "3973.0"
-    assert messages[-1].content == "The product is 3973."
+    assert result.reply == "The product is 3973."
 
 
 def test_unregistered_tool_call_returns_error_tool_message() -> None:
-    registry = ToolRegistry()
-    registry.register(echo)
     llm = ScriptedChatModel(
         script=[
             AIMessage(
@@ -120,21 +137,26 @@ def test_unregistered_tool_call_returns_error_tool_message() -> None:
             AIMessage(content="I could not use that tool."),
         ]
     )
-    graph = build_agent_graph(llm=llm, registry=registry)
-    result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="hack")]}))
-    tool_msg = next(msg for msg in result["messages"] if msg.type == "tool")
+    result = asyncio.run(run_agent("hack", tool_auth=default_tool_auth(), llm=llm))
+    tool_msg = next(item for item in result.messages if item.role == "tool")
     assert "not registered" in tool_msg.content
-    assert result["messages"][-1].content == "I could not use that tool."
+    assert result.reply == "I could not use that tool."
 
 
-def test_tool_execution_failure_does_not_crash_graph() -> None:
+def test_tool_execution_failure_does_not_crash_graph(monkeypatch: MonkeyPatch) -> None:
     @tool
     def boom() -> str:
         """Always fails."""
         raise RuntimeError("kaboom")
 
     registry = ToolRegistry()
-    registry.register(boom)
+    registry.register(boom, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
+    monkeypatch.setitem(
+        AGENT_TOOL_ALLOWLIST,
+        "default",
+        BUILTIN_TOOL_NAMES | frozenset({"boom"}),
+    )
+
     llm = ScriptedChatModel(
         script=[
             AIMessage(
@@ -151,8 +173,16 @@ def test_tool_execution_failure_does_not_crash_graph() -> None:
             AIMessage(content="Recovered after tool failure."),
         ]
     )
-    graph = build_agent_graph(llm=llm, registry=registry)
-    result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="go")]}))
+    graph = build_agent_graph(
+        llm=llm,
+        registry=registry,
+        permitted_tools=frozenset({"boom"}),
+    )
+    token = set_tool_auth_context(default_tool_auth())
+    try:
+        result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="go")]}))
+    finally:
+        reset_tool_auth_context(token)
     tool_msg = next(msg for msg in result["messages"] if msg.type == "tool")
     assert tool_msg.content == "Tool execution error for 'boom'"
     assert "kaboom" not in tool_msg.content

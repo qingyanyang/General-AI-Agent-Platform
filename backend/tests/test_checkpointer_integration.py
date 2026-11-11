@@ -17,6 +17,7 @@ from app.core.config import Settings
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
+from tests.chat_helpers import default_tool_auth
 from tests.conftest import checkpoint_test_database_url
 from tests.fakes import ScriptedChatModel
 
@@ -55,10 +56,15 @@ def test_postgres_multi_turn_and_isolation() -> None:
             thread_a = str(uuid.uuid4())
             thread_b = str(uuid.uuid4())
 
-            await run_agent("A1", llm=llm, checkpointer=saver, thread_id=thread_a)
-            await run_agent("B1", llm=llm, checkpointer=saver, thread_id=thread_b)
+            await run_agent(
+                "A1", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_a
+            )
+            await run_agent(
+                "B1", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_b
+            )
             again_a = await run_agent(
                 "A2",
+                tool_auth=default_tool_auth(),
                 llm=llm,
                 checkpointer=saver,
                 thread_id=thread_a,

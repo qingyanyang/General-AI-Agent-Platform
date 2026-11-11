@@ -8,6 +8,11 @@ from typing import Any
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
+from app.agents.tool_policy import (
+    ToolAuthContext,
+    ToolAuthorizationError,
+    authorize_tool_call,
+)
 from app.agents.tools.errors import (
     ToolNotRegisteredError,
     ToolRegistryError,
@@ -29,14 +34,21 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
+        self._required_permissions: dict[str, frozenset[str]] = {}
 
-    def register(self, tool: BaseTool) -> None:
+    def register(
+        self,
+        tool: BaseTool,
+        *,
+        required_permissions: frozenset[str],
+    ) -> None:
         name = tool.name
         if not name:
             raise ToolRegistryError("Tool must have a non-empty name")
         if name in self._tools:
             raise ToolRegistryError(f"Tool already registered: {name}")
         self._tools[name] = tool
+        self._required_permissions[name] = frozenset(required_permissions)
 
     def get(self, name: str) -> BaseTool:
         try:
@@ -47,11 +59,23 @@ class ToolRegistry:
     def has(self, name: str) -> bool:
         return name in self._tools
 
+    def required_permissions_for(self, name: str) -> frozenset[str]:
+        """Return required permissions for a registered tool."""
+        if name not in self._required_permissions:
+            raise ToolNotRegisteredError(name)
+        return self._required_permissions[name]
+
     def list(self) -> list[ToolMetadata]:
         return [self._metadata(tool) for tool in self._tools.values()]
 
-    def get_langchain_tools(self) -> list[BaseTool]:
-        return list(self._tools.values())
+    def get_langchain_tools(
+        self,
+        names: frozenset[str] | None = None,
+    ) -> list[BaseTool]:
+        tools = list(self._tools.values())
+        if names is None:
+            return tools
+        return [tool for tool in tools if tool.name in names]
 
     def _metadata(self, tool: BaseTool) -> ToolMetadata:
         schema: dict[str, Any]
@@ -68,9 +92,24 @@ class ToolRegistry:
             args_schema=schema,
         )
 
-    async def aexecute(self, name: str, args: dict[str, Any]) -> Any:
-        """Execute a registered tool; map validation failures to ToolValidationError."""
+    async def aexecute(
+        self,
+        name: str,
+        args: dict[str, Any],
+        *,
+        context: ToolAuthContext | None = None,
+    ) -> Any:
+        """Authorize then execute a registered tool.
+
+        Omitted or ``None`` ``context`` raises ``ToolAuthorizationError``
+        (never ``TypeError``). Authorization failures do not invoke the tool.
+        """
+        # Auth boundary first so missing context never becomes a TypeError.
+        if context is None:
+            raise ToolAuthorizationError(name, "not authorized (missing context)")
+
         tool = self.get(name)
+        authorize_tool_call(name=name, registry=self, context=context)
         try:
             return await tool.ainvoke(args)
         except ValidationError as exc:

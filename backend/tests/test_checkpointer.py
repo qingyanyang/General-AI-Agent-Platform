@@ -14,7 +14,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from tests.chat_helpers import seed_agent_grant
+from tests.chat_helpers import default_tool_auth, seed_agent_grant
 from tests.fakes import ScriptedChatModel
 
 
@@ -36,10 +36,22 @@ def test_multi_turn_same_thread_retains_context() -> None:
     )
 
     first = asyncio.run(
-        run_agent("My name is Alice", llm=llm, checkpointer=saver, thread_id=thread_id),
+        run_agent(
+            "My name is Alice",
+            tool_auth=default_tool_auth(),
+            llm=llm,
+            checkpointer=saver,
+            thread_id=thread_id,
+        ),
     )
     second = asyncio.run(
-        run_agent("What is my name?", llm=llm, checkpointer=saver, thread_id=thread_id),
+        run_agent(
+            "What is my name?",
+            tool_auth=default_tool_auth(),
+            llm=llm,
+            checkpointer=saver,
+            thread_id=thread_id,
+        ),
     )
 
     assert first.reply == "Hello Alice"
@@ -60,10 +72,20 @@ def test_different_threads_are_isolated() -> None:
     thread_a = "thread-a"
     thread_b = "thread-b"
 
-    asyncio.run(run_agent("A1", llm=llm, checkpointer=saver, thread_id=thread_a))
-    asyncio.run(run_agent("B1", llm=llm, checkpointer=saver, thread_id=thread_b))
+    asyncio.run(
+        run_agent(
+            "A1", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_a
+        )
+    )
+    asyncio.run(
+        run_agent(
+            "B1", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_b
+        )
+    )
     result_b = asyncio.run(
-        run_agent("B2", llm=llm, checkpointer=saver, thread_id=thread_b),
+        run_agent(
+            "B2", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_b
+        ),
     )
 
     user_messages = [m.content for m in result_b.messages if m.role == "user"]
@@ -81,8 +103,10 @@ def test_stateless_path_ignores_checkpointer() -> None:
         ]
     )
 
-    first = asyncio.run(run_agent("hi", llm=llm, checkpointer=saver))
-    second = asyncio.run(run_agent("again", llm=llm, checkpointer=saver))
+    first = asyncio.run(run_agent("hi", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver))
+    second = asyncio.run(
+        run_agent("again", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver)
+    )
 
     assert first.reply == "one"
     assert second.reply == "two"
@@ -92,7 +116,11 @@ def test_stateless_path_ignores_checkpointer() -> None:
 def test_thread_id_without_checkpointer_raises() -> None:
     llm = ScriptedChatModel(script=[AIMessage(content="x")])
     with pytest.raises(AgentNotConfiguredError, match="persistence"):
-        asyncio.run(run_agent("hi", llm=llm, thread_id="t1", checkpointer=None))
+        asyncio.run(
+            run_agent(
+                "hi", tool_auth=default_tool_auth(), llm=llm, thread_id="t1", checkpointer=None
+            )
+        )
 
 
 def test_only_new_human_message_is_passed_each_turn(monkeypatch: MonkeyPatch) -> None:
@@ -102,8 +130,13 @@ def test_only_new_human_message_is_passed_each_turn(monkeypatch: MonkeyPatch) ->
     captured: list[list] = []
     original_build = runtime_mod.build_agent_graph
 
-    def tracking_build(*, llm=None, registry=None, checkpointer=None):
-        graph = original_build(llm=llm, registry=registry, checkpointer=checkpointer)
+    def tracking_build(*, llm=None, registry=None, checkpointer=None, permitted_tools=None):
+        graph = original_build(
+            llm=llm,
+            registry=registry,
+            checkpointer=checkpointer,
+            permitted_tools=permitted_tools,
+        )
         original_ainvoke = graph.ainvoke
 
         async def wrapped_ainvoke(input_data, config=None, **kwargs):
@@ -120,8 +153,20 @@ def test_only_new_human_message_is_passed_each_turn(monkeypatch: MonkeyPatch) ->
     llm = ScriptedChatModel(
         script=[AIMessage(content="r1"), AIMessage(content="r2")],
     )
-    asyncio.run(run_agent("first", llm=llm, checkpointer=saver, thread_id=thread_id))
-    asyncio.run(run_agent("second", llm=llm, checkpointer=saver, thread_id=thread_id))
+    asyncio.run(
+        run_agent(
+            "first", tool_auth=default_tool_auth(), llm=llm, checkpointer=saver, thread_id=thread_id
+        )
+    )
+    asyncio.run(
+        run_agent(
+            "second",
+            tool_auth=default_tool_auth(),
+            llm=llm,
+            checkpointer=saver,
+            thread_id=thread_id,
+        )
+    )
 
     assert len(captured) == 2
     assert len(captured[0]) == 1 and isinstance(captured[0][0], HumanMessage)

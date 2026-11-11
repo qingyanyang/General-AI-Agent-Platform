@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from tests.chat_helpers import seed_agent_grant
+from tests.chat_helpers import default_tool_auth, seed_agent_grant
 from tests.fakes import ScriptedChatModel
 
 
@@ -48,7 +48,7 @@ def test_agent_routes_to_tools_then_finishes() -> None:
         ]
     )
 
-    result = asyncio.run(run_agent("What is 2 + 3?", llm=llm))
+    result = asyncio.run(run_agent("What is 2 + 3?", tool_auth=default_tool_auth(), llm=llm))
 
     assert result.reply == "The sum is 5."
     roles = [item.role for item in result.messages]
@@ -60,7 +60,7 @@ def test_agent_routes_to_tools_then_finishes() -> None:
 def test_agent_finishes_without_tools() -> None:
     llm = ScriptedChatModel(script=[AIMessage(content="Hello!")])
 
-    result = asyncio.run(run_agent("Hi", llm=llm))
+    result = asyncio.run(run_agent("Hi", tool_auth=default_tool_auth(), llm=llm))
 
     assert result.reply == "Hello!"
     assert [item.role for item in result.messages] == ["user", "assistant"]
@@ -80,7 +80,7 @@ def test_agent_recursion_limit_raises(monkeypatch: MonkeyPatch) -> None:
     )
 
     with pytest.raises(AgentExecutionError, match="recursion limit") as exc_info:
-        asyncio.run(run_agent("loop", llm=llm))
+        asyncio.run(run_agent("loop", tool_auth=default_tool_auth(), llm=llm))
 
     assert exc_info.value.execution_id
 
@@ -93,7 +93,7 @@ def test_agent_llm_failure_mapped_to_generic_message() -> None:
             raise RuntimeError("secret upstream detail")
 
     with pytest.raises(AgentExecutionError, match="^Agent execution failed$") as exc_info:
-        asyncio.run(run_agent("hi", llm=ExplodingModel(script=[])))
+        asyncio.run(run_agent("hi", tool_auth=default_tool_auth(), llm=ExplodingModel(script=[])))
 
     assert "secret" not in str(exc_info.value)
     assert exc_info.value.execution_id
@@ -105,7 +105,7 @@ def test_agent_value_error_is_execution_failure_not_misconfigured() -> None:
             raise ValueError("invalid model response shape")
 
     with pytest.raises(AgentExecutionError, match="^Agent execution failed$"):
-        asyncio.run(run_agent("hi", llm=ValueErrorModel(script=[])))
+        asyncio.run(run_agent("hi", tool_auth=default_tool_auth(), llm=ValueErrorModel(script=[])))
 
 
 def test_agent_requires_api_key_when_no_llm_injected(
@@ -114,7 +114,7 @@ def test_agent_requires_api_key_when_no_llm_injected(
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings_without_llm_keys)
 
     with pytest.raises(AgentNotConfiguredError):
-        asyncio.run(run_agent("hi"))
+        asyncio.run(run_agent("hi", tool_auth=default_tool_auth()))
 
 
 def _agent_headers() -> dict[str, str]:
@@ -128,7 +128,7 @@ def test_agents_run_api_success(
 ) -> None:
     seed_agent_grant(db_session, "test-user")
 
-    async def fake_run(message: str, *, llm=None) -> AgentResult:
+    async def fake_run(message: str, *, llm=None, **kwargs) -> AgentResult:
         return AgentResult(
             reply="ok",
             execution_id="11111111-1111-4111-8111-111111111111",
@@ -179,7 +179,7 @@ def test_agents_run_api_execution_error_returns_502(
 ) -> None:
     seed_agent_grant(db_session, "test-user", can_view=False, can_execute=True)
 
-    async def fake_run(message: str, *, llm=None) -> AgentResult:
+    async def fake_run(message: str, *, llm=None, **kwargs) -> AgentResult:
         raise AgentExecutionError("upstream failed")
 
     monkeypatch.setattr("app.api.routes.agents.run_agent", fake_run)
@@ -201,7 +201,7 @@ def test_agents_run_api_execution_error_includes_execution_id(
 ) -> None:
     seed_agent_grant(db_session, "test-user", can_view=False, can_execute=True)
 
-    async def fake_run(message: str, *, llm=None) -> AgentResult:
+    async def fake_run(message: str, *, llm=None, **kwargs) -> AgentResult:
         raise AgentExecutionError(
             "upstream failed",
             execution_id="11111111-1111-4111-8111-111111111111",
@@ -228,7 +228,7 @@ def test_agents_run_without_grant_returns_403(
 ) -> None:
     called = False
 
-    async def fake_run(message: str, *, llm=None) -> AgentResult:
+    async def fake_run(message: str, *, llm=None, **kwargs) -> AgentResult:
         nonlocal called
         called = True
         return AgentResult(

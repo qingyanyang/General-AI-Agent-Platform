@@ -20,6 +20,13 @@ from app.agents.messages import (
     message_content_text,
     normalize_message_views,
 )
+from app.agents.tool_policy import (
+    ToolAuthContext,
+    permitted_tool_names,
+    reset_tool_auth_context,
+    set_tool_auth_context,
+)
+from app.agents.tools import create_default_registry
 from app.agents.tracing import build_run_config, langsmith_tracing
 from app.core.config import get_settings
 from app.schemas.chat_message import (
@@ -82,6 +89,7 @@ def _normalize_messages(messages: list[BaseMessage]) -> list[AgentMessageView]:
 async def run_agent(
     message: str,
     *,
+    tool_auth: ToolAuthContext,
     llm: BaseChatModel | None = None,
     checkpointer: Any | None = None,
     thread_id: str | None = None,
@@ -91,6 +99,9 @@ async def run_agent(
     Stateless path (``thread_id is None``): compile without a checkpointer.
     Durable path (``thread_id`` set): require ``checkpointer`` and compile with it.
     Each turn passes only the new ``HumanMessage``; checkpoint restore retains history.
+
+    ``tool_auth`` is required. It is bound on a ContextVar for this task only
+    (not persisted in checkpoints or LangSmith metadata).
     """
     settings = get_settings()
     if llm is None:
@@ -104,34 +115,42 @@ async def run_agent(
     execution_id = uuid.uuid4()
     execution_id_text = str(execution_id)
     use_checkpointer = thread_id is not None
+    registry = create_default_registry()
+    permitted = permitted_tool_names(registry, tool_auth)
+    auth_token = set_tool_auth_context(tool_auth)
     try:
-        graph = build_agent_graph(
-            llm=llm,
-            checkpointer=checkpointer if use_checkpointer else None,
-        )
-        config = build_run_config(
-            settings,
-            execution_id,
-            thread_id=thread_id if use_checkpointer else None,
-        )
-        with langsmith_tracing(settings):
-            result = await graph.ainvoke(
-                {"messages": [HumanMessage(content=message)]},
-                config=config,
+        try:
+            graph = build_agent_graph(
+                llm=llm,
+                registry=registry if llm is not None else None,
+                checkpointer=checkpointer if use_checkpointer else None,
+                permitted_tools=permitted,
             )
-    except AgentNotConfiguredError:
-        raise
-    except GraphRecursionError as exc:
-        raise AgentExecutionError(
-            _RECURSION_MESSAGE,
-            execution_id=execution_id_text,
-        ) from exc
-    except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
-        logger.exception(_EXECUTION_FAILED_MESSAGE)
-        raise AgentExecutionError(
-            _EXECUTION_FAILED_MESSAGE,
-            execution_id=execution_id_text,
-        ) from exc
+            config = build_run_config(
+                settings,
+                execution_id,
+                thread_id=thread_id if use_checkpointer else None,
+            )
+            with langsmith_tracing(settings):
+                result = await graph.ainvoke(
+                    {"messages": [HumanMessage(content=message)]},
+                    config=config,
+                )
+        except AgentNotConfiguredError:
+            raise
+        except GraphRecursionError as exc:
+            raise AgentExecutionError(
+                _RECURSION_MESSAGE,
+                execution_id=execution_id_text,
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
+            logger.exception(_EXECUTION_FAILED_MESSAGE)
+            raise AgentExecutionError(
+                _EXECUTION_FAILED_MESSAGE,
+                execution_id=execution_id_text,
+            ) from exc
+    finally:
+        reset_tool_auth_context(auth_token)
 
     messages = list(result.get("messages", []))
     return AgentResult(
@@ -335,6 +354,7 @@ async def _stop_stream(
 async def stream_agent(
     message: str,
     *,
+    tool_auth: ToolAuthContext,
     llm: BaseChatModel | None = None,
     checkpointer: Any | None = None,
     thread_id: str | None = None,
@@ -348,6 +368,9 @@ async def stream_agent(
     iterator and propagates without an error event. A cancel that leaves a
     tool call without a result writes ``Tool execution cancelled`` for each
     pending id so the next turn stays valid.
+
+    ``tool_auth`` is required and bound on a ContextVar inside this generator
+    (the stream producer task) via try/finally — not in request-handler scope.
 
     The caller must own this generator. Closing it from a second task while it
     is running is not supported; cancel the task that is iterating it.
@@ -371,65 +394,73 @@ async def stream_agent(
     config: dict[str, Any] | None = None
     repair_tool_calls = False
     inflight: set[asyncio.Task[Any]] = set()
+    registry = create_default_registry()
+    permitted = permitted_tool_names(registry, tool_auth)
     inflight_token = inflight_node_tasks.set(inflight)
+    auth_token = set_tool_auth_context(tool_auth)
     try:
-        graph = build_agent_graph(
-            llm=llm,
-            checkpointer=checkpointer if use_checkpointer else None,
-        )
-        config = build_run_config(
-            settings,
-            execution_id,
-            thread_id=thread_id if use_checkpointer else None,
-        )
-        with langsmith_tracing(settings):
-            graph_iter = graph.astream(
-                {"messages": [HumanMessage(content=message)]},
-                config=config,
-                stream_mode=["messages", "updates"],
-            ).__aiter__()
-            while True:
-                try:
-                    item = await graph_iter.__anext__()
-                except StopAsyncIteration:
-                    break
-                for event in _events_from_stream_item(
-                    item,
-                    outcome.execution_id,
-                    collected,
-                    deltas,
-                ):
-                    yield event
-        outcome.message = ChatMessageOut(
-            role="assistant",
-            content=extract_assistant_reply(collected),
-        )
-    except asyncio.CancelledError:
-        repair_tool_calls = use_checkpointer
-        raise
-    except AgentNotConfiguredError as exc:
-        outcome.failed = True
-        yield StreamError(execution_id=outcome.execution_id, message=str(exc))
-    except GraphRecursionError:
-        outcome.failed = True
-        yield StreamError(execution_id=outcome.execution_id, message=_RECURSION_MESSAGE)
-    except Exception:  # noqa: BLE001 — map unexpected LLM/graph failures
-        logger.exception(_EXECUTION_FAILED_MESSAGE)
-        outcome.failed = True
-        yield StreamError(
-            execution_id=outcome.execution_id,
-            message=_EXECUTION_FAILED_MESSAGE,
-        )
-    finally:
         try:
-            await _await_despite_cancellation(
-                _stop_stream(
-                    inflight,
-                    graph_iter,
-                    graph,
-                    config,
-                    repair_tool_calls=repair_tool_calls,
-                )
+            graph = build_agent_graph(
+                llm=llm,
+                registry=registry if llm is not None else None,
+                checkpointer=checkpointer if use_checkpointer else None,
+                permitted_tools=permitted,
+            )
+            config = build_run_config(
+                settings,
+                execution_id,
+                thread_id=thread_id if use_checkpointer else None,
+            )
+            with langsmith_tracing(settings):
+                graph_iter = graph.astream(
+                    {"messages": [HumanMessage(content=message)]},
+                    config=config,
+                    stream_mode=["messages", "updates"],
+                ).__aiter__()
+                while True:
+                    try:
+                        item = await graph_iter.__anext__()
+                    except StopAsyncIteration:
+                        break
+                    for event in _events_from_stream_item(
+                        item,
+                        outcome.execution_id,
+                        collected,
+                        deltas,
+                    ):
+                        yield event
+            outcome.message = ChatMessageOut(
+                role="assistant",
+                content=extract_assistant_reply(collected),
+            )
+        except asyncio.CancelledError:
+            repair_tool_calls = use_checkpointer
+            raise
+        except AgentNotConfiguredError as exc:
+            outcome.failed = True
+            yield StreamError(execution_id=outcome.execution_id, message=str(exc))
+        except GraphRecursionError:
+            outcome.failed = True
+            yield StreamError(execution_id=outcome.execution_id, message=_RECURSION_MESSAGE)
+        except Exception:  # noqa: BLE001 — map unexpected LLM/graph failures
+            logger.exception(_EXECUTION_FAILED_MESSAGE)
+            outcome.failed = True
+            yield StreamError(
+                execution_id=outcome.execution_id,
+                message=_EXECUTION_FAILED_MESSAGE,
             )
         finally:
-            inflight_node_tasks.reset(inflight_token)
+            try:
+                await _await_despite_cancellation(
+                    _stop_stream(
+                        inflight,
+                        graph_iter,
+                        graph,
+                        config,
+                        repair_tool_calls=repair_tool_calls,
+                    )
+                )
+            finally:
+                inflight_node_tasks.reset(inflight_token)
+    finally:
+        reset_tool_auth_context(auth_token)
