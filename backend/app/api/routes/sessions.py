@@ -20,6 +20,7 @@ from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
 from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
+from app.models.agent import Agent, AgentStatus
 from app.models.chat_session import ChatSession
 from app.schemas.chat_message import (
     ChatMessageCreate,
@@ -35,6 +36,7 @@ from app.schemas.chat_session import (
     ChatSessionOut,
 )
 from app.services import agent_access as access_service
+from app.services import agents as agent_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
 
@@ -50,6 +52,17 @@ def _deny_agent_access() -> HTTPException:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=_AGENT_ACCESS_DENIED,
     )
+
+
+def _require_agent(db: Session, agent_id: str) -> Agent:
+    """Missing/invalid agent → 404."""
+    try:
+        return agent_service.require_agent(db, agent_id)
+    except (agent_service.AgentNotFoundError, agent_service.AgentValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        ) from exc
 
 
 def _ensure_capability(
@@ -70,6 +83,27 @@ def _ensure_capability(
         raise _deny_agent_access() from exc
 
 
+def _ensure_executable_agent(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+) -> None:
+    """404 missing → 403 no execute → 409 inactive."""
+    agent = _require_agent(db, agent_id)
+    _ensure_capability(
+        db,
+        user_id=user_id,
+        agent_id=agent_id,
+        capability=access_service.AgentCapability.EXECUTE,
+    )
+    if agent.status != AgentStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=agent_service.INACTIVE_AGENT_DETAIL,
+        )
+
+
 @contextmanager
 def _db_session(request: Request) -> Session:
     """Open a short-lived DB session; honor FastAPI dependency_overrides used in tests."""
@@ -88,12 +122,7 @@ def create_session(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
-    _ensure_capability(
-        db,
-        user_id=user.user_id,
-        agent_id=body.agent_id,
-        capability=access_service.AgentCapability.EXECUTE,
-    )
+    _ensure_executable_agent(db, user_id=user.user_id, agent_id=body.agent_id)
     session = session_service.create_session(
         db,
         user_id=user.user_id,
@@ -223,11 +252,10 @@ async def create_message(
             user_id=user.user_id,
             session_id=session_id,
         )
-        _ensure_capability(
+        _ensure_executable_agent(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
-            capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
         tool_auth = ToolAuthContext(
@@ -298,11 +326,10 @@ async def stream_message(
             user_id=user.user_id,
             session_id=session_id,
         )
-        _ensure_capability(
+        _ensure_executable_agent(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
-            capability=access_service.AgentCapability.EXECUTE,
         )
         owned_session_id = chat_session.id
         tool_auth = ToolAuthContext(

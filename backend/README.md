@@ -79,9 +79,9 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 
 | Permission | Meaning |
 | --- | --- |
-| `agents:read` | List/get sessions and message history |
+| `agents:read` | List/get agents (with view grant), sessions, and message history |
 | `agents:execute` | Create/archive sessions, post/stream messages, `POST /agents/run` |
-| `agents:configure` | Reserved for agent configuration APIs (not wired yet) |
+| `agents:configure` | Create/update/deactivate agents (#19); creator auto-receives view+configure+execute on new agents |
 | `agent-access:manage` | Grant / inspect / revoke per-user agent access (#17) |
 
 | Role | Permissions |
@@ -92,15 +92,31 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 
 Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership or per-agent grants. **Admin has no implicit view/configure/execute** on agents — `agent-access:manage` only authorizes grant APIs.
 
+### Agent catalog (#19)
+
+Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`). Migrations always seed a fixed active agent `id=default`. If you set `AGENT_ID` to something else, provision that agent separately (create via API or SQL)—migrations do not read runtime settings.
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction |
+| `GET` | `/agents` | `agents:read` — lists agents the caller can **view** (`status=active\|inactive\|all`, default `active`) |
+| `GET` | `/agents/{agent_id}` | `agents:read` + view grant; **missing view → 404** (catalog non-disclosure; distinct from session-scoped **403**) |
+| `PATCH` | `/agents/{agent_id}` | `agents:configure` + configure grant — `name` / `description` only (`id` immutable; omit vs `null` for description) |
+| `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + configure grant — soft-deactivate (idempotent) |
+
+**Deactivation** blocks **all new executions** with **409** `Agent is inactive` (before the model runs): new sessions, existing-session JSON/SSE, and session-scoped or stateless `/agents/run`. Existing history remains readable under ownership + view grants. Tools for new agents still follow the #18 code allowlist until #20.
+
+Platform permissions remain required to use creator auto-grants (having `can_execute` on a grant does not replace `agents:execute`).
+
 ### Agent-level access (#17)
 
-In addition to platform permissions, callers need a per-user grant for the specific `agent_id` (Auth0 `sub` + agent id). Until Agent CRUD (#19), agent ids are free-form strings (same rules as session `agent_id`); isolation tests may use ids such as `reporting` / `finance` against the single configured graph.
+In addition to platform permissions, callers need a per-user grant for the specific `agent_id` (Auth0 `sub` + agent id). Agent ids must refer to a persisted Agent row (#19).
 
 | Capability | Controls |
 | --- | --- |
-| `view` | Session list/get and message history |
-| `execute` | Create session, post/stream messages, `POST /agents/run` |
-| `configure` | Stored on grants; no HTTP routes yet |
+| `view` | Agent GET/list, session list/get, and message history |
+| `execute` | Create session, post/stream messages, `POST /agents/run` (agent must be **active**) |
+| `configure` | Agent PATCH / deactivate |
 
 **Execute-only grants are allowed:** the user can create/send and receive the current-turn reply, but cannot list or retrieve history without `view`. JSON and SSE responses expose only the current run (not prior message objects). `/agents/run` without `view` returns `reply` plus a single current-turn assistant entry in `messages` — not the full checkpoint transcript.
 

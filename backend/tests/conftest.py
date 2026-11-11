@@ -11,9 +11,11 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.main import app
+from app.models.agent import Agent  # noqa: F401
 from app.models.agent_access_grant import AgentAccessGrant  # noqa: F401
 from app.models.base import Base, postgres_schema_name
 from app.models.chat_session import ChatSession  # noqa: F401
+from app.services.agents import ensure_default_agent
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -72,6 +74,8 @@ def db_session(db_engine) -> Generator[Session, None, None]:
     factory = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
     session = factory()
     try:
+        # Mirror Alembic seed so session/grant tests have an active default agent.
+        ensure_default_agent(session)
         yield session
     finally:
         session.close()

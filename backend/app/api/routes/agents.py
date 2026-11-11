@@ -1,4 +1,4 @@
-"""Minimal agent invoke API for testing the LangGraph runtime."""
+"""Agent catalog CRUD (#19) and invoke API."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -18,8 +18,21 @@ from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.permissions import PERM_AGENTS_EXECUTE
+from app.core.permissions import (
+    PERM_AGENTS_CONFIGURE,
+    PERM_AGENTS_EXECUTE,
+    PERM_AGENTS_READ,
+)
+from app.models.agent import Agent, AgentStatus
+from app.schemas.agent import (
+    AgentCreate,
+    AgentListOut,
+    AgentOut,
+    AgentStatusFilter,
+    AgentUpdate,
+)
 from app.services import agent_access as access_service
+from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -55,6 +68,28 @@ def _db_session(request: Request) -> Session:
         generator.close()
 
 
+def _http_inactive() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=agent_service.INACTIVE_AGENT_DETAIL,
+    )
+
+
+def _http_agent_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Agent not found",
+    )
+
+
+def _require_agent(db: Session, agent_id: str) -> Agent:
+    """Load agent; missing/invalid id → 404."""
+    try:
+        return agent_service.require_agent(db, agent_id)
+    except (agent_service.AgentNotFoundError, agent_service.AgentValidationError) as exc:
+        raise _http_agent_not_found() from exc
+
+
 def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
     """Require execute; return whether the caller also has view."""
     try:
@@ -77,6 +112,91 @@ def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
     )
 
 
+def _ensure_executable_agent(db: Session, *, user_id: str, agent_id: str) -> bool:
+    """404 missing → 403 no execute → 409 inactive. Returns whether caller has view."""
+    agent = _require_agent(db, agent_id)
+    include_history = _ensure_execute(db, user_id=user_id, agent_id=agent_id)
+    if agent.status != AgentStatus.ACTIVE.value:
+        raise _http_inactive()
+    return include_history
+
+
+def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> None:
+    # Unknown/invalid agent → 404 first (catalog non-disclosure).
+    _require_agent(db, agent_id)
+    try:
+        access_service.ensure_agent_capability(
+            db,
+            user_id=user_id,
+            agent_id=agent_id,
+            capability=access_service.AgentCapability.CONFIGURE,
+        )
+    except access_service.AgentAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_ACCESS_DENIED,
+        ) from exc
+
+
+@router.post("", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
+def create_agent(
+    body: AgentCreate,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentOut:
+    try:
+        agent = agent_service.create_agent(
+            db,
+            agent_id=body.id,
+            name=body.name,
+            description=body.description,
+            created_by=user.user_id,
+        )
+    except agent_service.AgentConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Agent already exists",
+        ) from exc
+    except agent_service.AgentValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return AgentOut.model_validate(agent)
+
+
+@router.get("", response_model=AgentListOut)
+def list_agents(
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
+    db: Annotated[Session, Depends(get_db)],
+    status_filter: Annotated[
+        AgentStatusFilter,
+        Query(alias="status"),
+    ] = AgentStatusFilter.ACTIVE,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query()] = None,
+) -> AgentListOut:
+    try:
+        page = agent_service.list_agents_for_user(
+            db,
+            user_id=user.user_id,
+            status=status_filter,
+            limit=limit,
+            cursor=cursor,
+        )
+    except agent_service.AgentValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return AgentListOut(
+        items=[AgentOut.model_validate(item) for item in page.items],
+        next_cursor=page.next_cursor,
+    )
+
+
+# Literal `/run` must stay registered before `/{agent_id}` routes that could
+# otherwise capture the path segment in some routers.
 @router.post("/run", response_model=AgentRunResponse)
 async def agents_run(
     body: AgentRunRequest,
@@ -87,7 +207,7 @@ async def agents_run(
         if body.session_id is None:
             agent_id = get_settings().agent_id
             with _db_session(request) as db:
-                include_history = _ensure_execute(
+                include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
@@ -111,13 +231,13 @@ async def agents_run(
                     user_id=user.user_id,
                     session_id=body.session_id,
                 )
-                include_history = _ensure_execute(
+                agent_id = chat_session.agent_id
+                include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
-                    agent_id=chat_session.agent_id,
+                    agent_id=agent_id,
                 )
                 thread_id = thread_id_for_session(chat_session.id)
-                agent_id = chat_session.agent_id
             tool_auth = ToolAuthContext(
                 user_id=user.user_id,
                 permissions=user.permissions,
@@ -158,3 +278,62 @@ async def agents_run(
         execution_id=result.execution_id,
         messages=messages,
     )
+
+
+@router.get("/{agent_id}", response_model=AgentOut)
+def get_agent(
+    agent_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_READ))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentOut:
+    agent = _require_agent(db, agent_id)
+    if not access_service.user_has_capability(
+        db,
+        user_id=user.user_id,
+        agent_id=agent.id,
+        capability=access_service.AgentCapability.VIEW,
+    ):
+        # Catalog non-disclosure: missing view → 404 (distinct from session 403).
+        raise _http_agent_not_found()
+    return AgentOut.model_validate(agent)
+
+
+@router.patch("/{agent_id}", response_model=AgentOut)
+def update_agent(
+    agent_id: str,
+    body: AgentUpdate,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentOut:
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    try:
+        agent = agent_service.update_agent(
+            db,
+            agent_id=agent_id,
+            name=body.name,
+            update_name="name" in body.model_fields_set,
+            description=body.description,
+            update_description="description" in body.model_fields_set,
+        )
+    except agent_service.AgentNotFoundError as exc:
+        raise _http_agent_not_found() from exc
+    except agent_service.AgentValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return AgentOut.model_validate(agent)
+
+
+@router.post("/{agent_id}/deactivate", response_model=AgentOut)
+def deactivate_agent(
+    agent_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentOut:
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    try:
+        agent = agent_service.deactivate_agent(db, agent_id=agent_id)
+    except agent_service.AgentNotFoundError as exc:
+        raise _http_agent_not_found() from exc
+    return AgentOut.model_validate(agent)
