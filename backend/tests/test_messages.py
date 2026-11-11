@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from tests.chat_helpers import OTHER, default_tool_auth
+from tests.chat_helpers import OTHER, default_execution_config, default_tool_auth
 from tests.chat_helpers import create_session as _create_session
 from tests.chat_helpers import headers as _headers
 from tests.chat_helpers import with_saver as _with_saver
@@ -181,6 +181,7 @@ def test_get_history_without_llm_api_key(
         run_agent(
             "seed",
             tool_auth=default_tool_auth(),
+            execution_config=default_execution_config(),
             llm=llm,
             checkpointer=saver,
             thread_id=thread_id,

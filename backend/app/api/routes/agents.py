@@ -1,4 +1,4 @@
-"""Agent catalog CRUD (#19) and invoke API."""
+"""Agent catalog CRUD (#19), configuration (#20), and invoke API."""
 
 from __future__ import annotations
 
@@ -31,9 +31,11 @@ from app.schemas.agent import (
     AgentStatusFilter,
     AgentUpdate,
 )
+from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
 from app.services import agent_access as access_service
 from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
+from app.services.agents import AgentExecutionConfig
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -112,18 +114,23 @@ def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
     )
 
 
-def _ensure_executable_agent(db: Session, *, user_id: str, agent_id: str) -> bool:
-    """404 missing → 403 no execute → 409 inactive. Returns whether caller has view."""
+def _ensure_executable_agent(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+) -> tuple[Agent, bool]:
+    """404 missing → 403 no execute → 409 inactive. Returns agent + has_view."""
     agent = _require_agent(db, agent_id)
     include_history = _ensure_execute(db, user_id=user_id, agent_id=agent_id)
     if agent.status != AgentStatus.ACTIVE.value:
         raise _http_inactive()
-    return include_history
+    return agent, include_history
 
 
-def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> None:
+def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> Agent:
     # Unknown/invalid agent → 404 first (catalog non-disclosure).
-    _require_agent(db, agent_id)
+    agent = _require_agent(db, agent_id)
     try:
         access_service.ensure_agent_capability(
             db,
@@ -136,6 +143,41 @@ def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=_AGENT_ACCESS_DENIED,
         ) from exc
+    return agent
+
+
+def _execution_bundle(
+    agent: Agent,
+    *,
+    user_id: str,
+    permissions: frozenset[str],
+) -> tuple[AgentExecutionConfig, ToolAuthContext]:
+    """Snapshot + validate config, then build tool auth (no further DB reads)."""
+    execution_config = agent_service.snapshot_execution_config(agent)
+    try:
+        agent_service.validate_execution_config(execution_config)
+    except AgentNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    tool_auth = ToolAuthContext(
+        user_id=user_id,
+        permissions=permissions,
+        agent_id=agent.id,
+        allowed_tools=frozenset(execution_config.tool_names),
+    )
+    return execution_config, tool_auth
+
+
+def _configuration_out(agent: Agent) -> AgentConfigurationOut:
+    return AgentConfigurationOut(
+        system_prompt=agent.system_prompt or "",
+        llm_provider=agent.llm_provider,
+        llm_model=agent.llm_model,
+        temperature=agent.temperature,
+        tool_names=[str(name) for name in (agent.tool_names or [])],
+    )
 
 
 @router.post("", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
@@ -207,17 +249,21 @@ async def agents_run(
         if body.session_id is None:
             agent_id = get_settings().agent_id
             with _db_session(request) as db:
-                include_history = _ensure_executable_agent(
+                agent, include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
                 )
-            tool_auth = ToolAuthContext(
-                user_id=user.user_id,
-                permissions=user.permissions,
-                agent_id=agent_id,
+                execution_config, tool_auth = _execution_bundle(
+                    agent,
+                    user_id=user.user_id,
+                    permissions=user.permissions,
+                )
+            result = await run_agent(
+                body.message,
+                tool_auth=tool_auth,
+                execution_config=execution_config,
             )
-            result = await run_agent(body.message, tool_auth=tool_auth)
         else:
             checkpointer = getattr(request.app.state, "checkpointer", None)
             if checkpointer is None:
@@ -232,20 +278,21 @@ async def agents_run(
                     session_id=body.session_id,
                 )
                 agent_id = chat_session.agent_id
-                include_history = _ensure_executable_agent(
+                agent, include_history = _ensure_executable_agent(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
                 )
+                execution_config, tool_auth = _execution_bundle(
+                    agent,
+                    user_id=user.user_id,
+                    permissions=user.permissions,
+                )
                 thread_id = thread_id_for_session(chat_session.id)
-            tool_auth = ToolAuthContext(
-                user_id=user.user_id,
-                permissions=user.permissions,
-                agent_id=agent_id,
-            )
             result = await run_agent(
                 body.message,
                 tool_auth=tool_auth,
+                execution_config=execution_config,
                 checkpointer=checkpointer,
                 thread_id=thread_id,
             )
@@ -296,6 +343,50 @@ def get_agent(
         # Catalog non-disclosure: missing view → 404 (distinct from session 403).
         raise _http_agent_not_found()
     return AgentOut.model_validate(agent)
+
+
+@router.get("/{agent_id}/configuration", response_model=AgentConfigurationOut)
+def get_agent_configuration(
+    agent_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentConfigurationOut:
+    agent = _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    return _configuration_out(agent)
+
+
+@router.put("/{agent_id}/configuration", response_model=AgentConfigurationOut)
+def put_agent_configuration(
+    agent_id: str,
+    body: AgentConfigurationIn,
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentConfigurationOut:
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    try:
+        agent = agent_service.update_configuration(
+            db,
+            agent_id=agent_id,
+            system_prompt=body.system_prompt,
+            llm_provider=body.llm_provider,
+            llm_model=body.llm_model,
+            temperature=body.temperature,
+            tool_names=body.tool_names,
+            caller_permissions=user.permissions,
+        )
+    except agent_service.AgentNotFoundError as exc:
+        raise _http_agent_not_found() from exc
+    except agent_service.AgentToolAssignDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except agent_service.AgentValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return _configuration_out(agent)
 
 
 @router.patch("/{agent_id}", response_model=AgentOut)

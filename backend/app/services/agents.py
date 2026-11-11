@@ -1,4 +1,4 @@
-"""Agent catalog persistence and queries (#19)."""
+"""Agent catalog persistence, configuration (#20), and queries (#19)."""
 
 from __future__ import annotations
 
@@ -11,14 +11,27 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.agents.errors import AgentNotConfiguredError
+from app.agents.tools import create_default_registry
 from app.core.auth import USER_ID_MAX_LENGTH
+from app.core.config import (
+    ApprovedLlmCatalogError,
+    ApprovedLlmModel,
+    get_settings,
+)
 from app.models.agent import Agent, AgentStatus
 from app.schemas.agent import AgentStatusFilter
+from app.schemas.agent_config import SYSTEM_PROMPT_MAX_LENGTH
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 from app.services import agent_access as access_service
 
 INACTIVE_AGENT_DETAIL = "Agent is inactive"
 DEFAULT_AGENT_ID = "default"
+# Match Alembic 20261111_0005 fixed literals for unit-test ensure_default_agent.
+_MIGRATION_DEFAULT_PROVIDER = "deepseek"
+_MIGRATION_DEFAULT_MODEL = "deepseek-flash"
+_MIGRATION_DEFAULT_TEMPERATURE = 1.0
+_MIGRATION_DEFAULT_TOOLS: list[str] = ["add", "multiply", "echo"]
 _CURSOR_SEP = "|"
 
 
@@ -36,6 +49,26 @@ class AgentConflictError(Exception):
 
 class AgentValidationError(Exception):
     """Invalid agent payload or pagination cursor."""
+
+
+class AgentToolAssignDenied(Exception):
+    """Caller lacks required_permissions to assign a tool."""
+
+    def __init__(self, tool_name: str) -> None:
+        self.tool_name = tool_name
+        super().__init__(f"not authorized to assign tool '{tool_name}'")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentExecutionConfig:
+    """Immutable snapshot of agent runtime configuration (no DB after build)."""
+
+    agent_id: str
+    system_prompt: str
+    llm_provider: str
+    llm_model: str
+    temperature: float | None
+    tool_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -91,6 +124,28 @@ def require_active_agent(db: Session, agent_id: str) -> Agent:
     return agent
 
 
+def _default_create_config_fields() -> dict[str, object]:
+    """Application create defaults from settings catalog (not Alembic literals)."""
+    try:
+        approved = get_settings().default_approved_llm()
+    except ApprovedLlmCatalogError as exc:
+        raise AgentValidationError(str(exc)) from exc
+    temperature: float | None
+    if approved.supports_temperature:
+        assert approved.temperature_min is not None
+        assert approved.temperature_max is not None
+        temperature = (approved.temperature_min + approved.temperature_max) / 2.0
+    else:
+        temperature = None
+    return {
+        "system_prompt": "",
+        "llm_provider": approved.provider,
+        "llm_model": approved.model,
+        "temperature": temperature,
+        "tool_names": [],
+    }
+
+
 def ensure_default_agent(db: Session) -> Agent:
     """Idempotent seed used by unit tests (migrations seed Postgres)."""
     existing = db.get(Agent, DEFAULT_AGENT_ID)
@@ -105,6 +160,11 @@ def ensure_default_agent(db: Session) -> Agent:
         created_by="system",
         created_at=now,
         updated_at=now,
+        system_prompt="",
+        llm_provider=_MIGRATION_DEFAULT_PROVIDER,
+        llm_model=_MIGRATION_DEFAULT_MODEL,
+        temperature=_MIGRATION_DEFAULT_TEMPERATURE,
+        tool_names=list(_MIGRATION_DEFAULT_TOOLS),
     )
     db.add(agent)
     db.commit()
@@ -127,6 +187,7 @@ def create_agent(
         raise AgentConflictError
 
     now = _utcnow()
+    config_fields = _default_create_config_fields()
     agent = Agent(
         id=agent_id,
         name=name,
@@ -135,17 +196,20 @@ def create_agent(
         created_by=created_by,
         created_at=now,
         updated_at=now,
+        system_prompt=str(config_fields["system_prompt"]),
+        llm_provider=str(config_fields["llm_provider"]),
+        llm_model=str(config_fields["llm_model"]),
+        temperature=config_fields["temperature"],  # type: ignore[arg-type]
+        tool_names=list(config_fields["tool_names"]),  # type: ignore[arg-type]
     )
     db.add(agent)
     try:
         db.flush()
     except IntegrityError as exc:
-        # Only agent PK conflicts map to "already exists".
         db.rollback()
         raise AgentConflictError from exc
 
     try:
-        # Upsert so pre-existing (orphan) grants become the full creator grant.
         access_service.upsert_grant(
             db,
             user_id=created_by,
@@ -191,6 +255,125 @@ def deactivate_agent(db: Session, *, agent_id: str) -> Agent:
         db.commit()
         db.refresh(agent)
     return agent
+
+
+def _validate_temperature(
+    approved: ApprovedLlmModel,
+    temperature: float | None,
+) -> None:
+    if not approved.supports_temperature:
+        if temperature is not None:
+            raise AgentValidationError(
+                f"model '{approved.provider}/{approved.model}' does not support temperature",
+            )
+        return
+    assert approved.temperature_min is not None
+    assert approved.temperature_max is not None
+    if temperature is None:
+        raise AgentValidationError(
+            f"temperature is required for model '{approved.provider}/{approved.model}'",
+        )
+    if temperature < approved.temperature_min or temperature > approved.temperature_max:
+        raise AgentValidationError(
+            f"temperature must be between {approved.temperature_min} and "
+            f"{approved.temperature_max} for '{approved.provider}/{approved.model}'",
+        )
+
+
+def update_configuration(
+    db: Session,
+    *,
+    agent_id: str,
+    system_prompt: str,
+    llm_provider: str,
+    llm_model: str,
+    temperature: float | None,
+    tool_names: list[str],
+    caller_permissions: frozenset[str],
+) -> Agent:
+    """Replace configuration under a row lock; check tool-add permissions vs old set."""
+    agent_id = validate_agent_id(agent_id)
+    if len(system_prompt) > SYSTEM_PROMPT_MAX_LENGTH:
+        raise AgentValidationError(
+            f"system_prompt must be at most {SYSTEM_PROMPT_MAX_LENGTH} characters",
+        )
+
+    settings = get_settings()
+    approved = settings.get_approved_llm(llm_provider, llm_model)
+    if approved is None:
+        raise AgentValidationError(
+            f"LLM '{llm_provider}/{llm_model}' is not in APPROVED_LLM_MODELS",
+        )
+    _validate_temperature(approved, temperature)
+
+    registry = create_default_registry()
+    for name in tool_names:
+        if not registry.has(name):
+            raise AgentValidationError(f"unknown tool '{name}'")
+
+    stmt = select(Agent).where(Agent.id == agent_id).with_for_update()
+    agent = db.scalar(stmt)
+    if agent is None:
+        raise AgentNotFoundError
+
+    old_tools = {str(item) for item in (agent.tool_names or [])}
+    new_tools = set(tool_names)
+    for name in new_tools - old_tools:
+        required = registry.required_permissions_for(name)
+        if not required <= caller_permissions:
+            raise AgentToolAssignDenied(name)
+
+    agent.system_prompt = system_prompt
+    agent.llm_provider = approved.provider
+    agent.llm_model = approved.model
+    agent.temperature = temperature
+    agent.tool_names = list(tool_names)
+    agent.updated_at = _utcnow()
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+
+def snapshot_execution_config(agent: Agent) -> AgentExecutionConfig:
+    """Build an immutable config snapshot from a loaded Agent row."""
+    tools = tuple(str(name) for name in (agent.tool_names or []))
+    return AgentExecutionConfig(
+        agent_id=agent.id,
+        system_prompt=agent.system_prompt or "",
+        llm_provider=agent.llm_provider,
+        llm_model=agent.llm_model,
+        temperature=agent.temperature,
+        tool_names=tools,
+    )
+
+
+def validate_execution_config(config: AgentExecutionConfig) -> None:
+    """Validate snapshot for execution; raise AgentNotConfiguredError on failure."""
+    settings = get_settings()
+    approved = settings.get_approved_llm(config.llm_provider, config.llm_model)
+    if approved is None:
+        raise AgentNotConfiguredError(
+            f"Agent configuration is invalid: LLM "
+            f"'{config.llm_provider}/{config.llm_model}' is not approved",
+        )
+    try:
+        _validate_temperature(approved, config.temperature)
+    except AgentValidationError as exc:
+        raise AgentNotConfiguredError(
+            f"Agent configuration is invalid: {exc}",
+        ) from exc
+
+    registry = create_default_registry()
+    for name in config.tool_names:
+        if not registry.has(name):
+            raise AgentNotConfiguredError(
+                f"Agent configuration is invalid: tool '{name}' is not registered",
+            )
+
+    if not settings.resolve_llm_api_key_for_provider(config.llm_provider):
+        raise AgentNotConfiguredError(
+            "LLM API key is not configured; cannot run the agent",
+        )
 
 
 def encode_agent_cursor(created_at: datetime, agent_id: str) -> str:

@@ -394,7 +394,10 @@ def test_json_and_sse_execute_only_do_not_replay_prior_message_objects(
             AIMessage(content="streamed reply"),
         ]
     )
-    monkeypatch.setattr("app.agents.graph.create_chat_model", lambda: scripted)
+    monkeypatch.setattr(
+        "app.agents.runtime.create_chat_model_for_agent",
+        lambda **_kwargs: scripted,
+    )
     first = api_client.post(
         f"/sessions/{session_id}/messages",
         json={"content": "prior secret history"},

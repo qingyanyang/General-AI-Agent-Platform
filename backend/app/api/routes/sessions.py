@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
-from app.agents.runtime import StreamOutcome, ensure_llm_configured
+from app.agents.runtime import StreamOutcome
 from app.agents.tool_policy import ToolAuthContext
 from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
@@ -39,6 +39,7 @@ from app.services import agent_access as access_service
 from app.services import agents as agent_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
+from app.services.agents import AgentExecutionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def _ensure_executable_agent(
     *,
     user_id: str,
     agent_id: str,
-) -> None:
+) -> Agent:
     """404 missing → 403 no execute → 409 inactive."""
     agent = _require_agent(db, agent_id)
     _ensure_capability(
@@ -102,6 +103,31 @@ def _ensure_executable_agent(
             status_code=status.HTTP_409_CONFLICT,
             detail=agent_service.INACTIVE_AGENT_DETAIL,
         )
+    return agent
+
+
+def _execution_bundle(
+    agent: Agent,
+    *,
+    user_id: str,
+    permissions: frozenset[str],
+) -> tuple[AgentExecutionConfig, ToolAuthContext]:
+    """Snapshot + validate config before closing the DB session."""
+    execution_config = agent_service.snapshot_execution_config(agent)
+    try:
+        agent_service.validate_execution_config(execution_config)
+    except AgentNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    tool_auth = ToolAuthContext(
+        user_id=user_id,
+        permissions=permissions,
+        agent_id=agent.id,
+        allowed_tools=frozenset(execution_config.tool_names),
+    )
+    return execution_config, tool_auth
 
 
 @contextmanager
@@ -123,6 +149,7 @@ def create_session(
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
     _ensure_executable_agent(db, user_id=user.user_id, agent_id=body.agent_id)
+    # Create does not need an execution snapshot; only active+execute gates.
     session = session_service.create_session(
         db,
         user_id=user.user_id,
@@ -252,16 +279,16 @@ async def create_message(
             user_id=user.user_id,
             session_id=session_id,
         )
-        _ensure_executable_agent(
+        agent = _ensure_executable_agent(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
         )
         owned_session_id = chat_session.id
-        tool_auth = ToolAuthContext(
+        execution_config, tool_auth = _execution_bundle(
+            agent,
             user_id=user.user_id,
             permissions=user.permissions,
-            agent_id=chat_session.agent_id,
         )
 
     try:
@@ -270,6 +297,7 @@ async def create_message(
             checkpointer=checkpointer,
             session_id=owned_session_id,
             tool_auth=tool_auth,
+            execution_config=execution_config,
         )
     except AgentNotConfiguredError as exc:
         raise HTTPException(
@@ -326,24 +354,18 @@ async def stream_message(
             user_id=user.user_id,
             session_id=session_id,
         )
-        _ensure_executable_agent(
+        agent = _ensure_executable_agent(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
         )
         owned_session_id = chat_session.id
-        tool_auth = ToolAuthContext(
+        # Preflight before StreamingResponse so config failures are HTTP 503.
+        execution_config, tool_auth = _execution_bundle(
+            agent,
             user_id=user.user_id,
             permissions=user.permissions,
-            agent_id=chat_session.agent_id,
         )
-    try:
-        ensure_llm_configured()
-    except AgentNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
 
     outcome = StreamOutcome()
 
@@ -357,6 +379,7 @@ async def stream_message(
                     checkpointer=checkpointer,
                     session_id=owned_session_id,
                     tool_auth=tool_auth,
+                    execution_config=execution_config,
                     outcome=outcome,
                 ):
                     queue.put_nowait(event)

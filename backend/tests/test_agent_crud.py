@@ -377,7 +377,7 @@ def _use_model(monkeypatch: MonkeyPatch, model: ScriptedChatModel) -> None:
         return Settings(_env_file=None, llm_api_key="test-key")
 
     monkeypatch.setattr("app.agents.runtime.get_settings", _settings)
-    monkeypatch.setattr("app.agents.graph.create_chat_model", lambda: model)
+    monkeypatch.setattr("app.agents.runtime.create_chat_model_for_agent", lambda **_kwargs: model)
 
 
 def test_deactivate_blocks_all_execution_entry_points(
@@ -484,12 +484,12 @@ def test_deactivate_blocks_all_execution_entry_points(
     assert len(history.json()["items"]) >= 2
 
 
-def test_new_agent_uses_graph_unknown_allowlist_has_no_tools(
+def test_new_agent_defaults_to_empty_tools(
     api_client: TestClient,
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """New agents reuse the runtime graph; #18 allowlist is empty for unknown ids."""
+    """New agents start with tool_names=[] (empty ≠ all tools)."""
     seed_agent_grant(db_session, USER, "default", can_configure=True)
     created = api_client.post(
         "/agents",
@@ -497,9 +497,12 @@ def test_new_agent_uses_graph_unknown_allowlist_has_no_tools(
         headers=_configure_headers(),
     )
     assert created.status_code == 201
+    agent = db_session.get(Agent, "brand-new")
+    assert agent is not None
+    assert agent.tool_names == []
 
     registry = create_default_registry()
-    auth = default_tool_auth(agent_id="brand-new")
+    auth = default_tool_auth(agent_id="brand-new", allowed_tools=frozenset())
     assert permitted_tool_names(registry, auth) == frozenset()
 
     _use_model(

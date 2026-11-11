@@ -19,6 +19,8 @@ class ToolAuthContext:
     user_id: str
     permissions: frozenset[str]
     agent_id: str
+    # Persisted agent tool assignments (#20). Empty ⇒ no tools (never all-tools).
+    allowed_tools: frozenset[str] = frozenset()
 
 
 class ToolAuthorizationError(Exception):
@@ -35,14 +37,6 @@ BUILTIN_TOOL_NAMES: frozenset[str] = frozenset({"add", "multiply", "echo"})
 
 # Default required permissions for built-in tools (issue #18 decision 1A).
 BUILTIN_REQUIRED_PERMISSIONS: frozenset[str] = frozenset({PERM_AGENTS_EXECUTE})
-
-# Code/config allowlist by agent_id (separate from #17 access grants).
-# Unknown agent_id → empty set (fail closed).
-AGENT_TOOL_ALLOWLIST: dict[str, frozenset[str]] = {
-    "default": BUILTIN_TOOL_NAMES,
-    # Strict subset for authorization tests (tools not listed → denied).
-    "reporting": frozenset({"echo"}),
-}
 
 _tool_auth_context: ContextVar[ToolAuthContext | None] = ContextVar(
     "tool_auth_context",
@@ -65,19 +59,13 @@ def get_tool_auth_context() -> ToolAuthContext | None:
     return _tool_auth_context.get()
 
 
-def agent_tool_allowlist(agent_id: str) -> frozenset[str]:
-    """Allowlisted tool names for ``agent_id``; unknown agents get nothing."""
-    return AGENT_TOOL_ALLOWLIST.get(agent_id, frozenset())
-
-
 def permitted_tool_names(
     registry: ToolRegistry,
     context: ToolAuthContext,
 ) -> frozenset[str]:
-    """Intersection of allowlist, registry, and user permissions."""
-    allowed = agent_tool_allowlist(context.agent_id)
+    """Intersection of persisted allowlist, registry, and user permissions."""
     permitted: set[str] = set()
-    for name in allowed:
+    for name in context.allowed_tools:
         if not registry.has(name):
             continue
         required = registry.required_permissions_for(name)
@@ -98,7 +86,7 @@ def authorize_tool_call(
     """
     if context is None:
         raise ToolAuthorizationError(name, "not authorized (missing context)")
-    if name not in agent_tool_allowlist(context.agent_id):
+    if name not in context.allowed_tools:
         raise ToolAuthorizationError(name, "not authorized for this agent")
     required = registry.required_permissions_for(name)
     if not required <= context.permissions:

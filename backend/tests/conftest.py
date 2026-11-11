@@ -35,6 +35,7 @@ def _clear_agent_graph_cache() -> Generator[None, None, None]:
 def client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
     """HTTP client with checkpointer disabled (no DATABASE_URL for unit tests)."""
     monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
     get_settings.cache_clear()
     app.dependency_overrides[get_current_user] = stub_get_current_user
     with TestClient(app) as test_client:
@@ -47,6 +48,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]
 def db_engine(monkeypatch: pytest.MonkeyPatch):
     """In-memory SQLite; schema_translate_map keeps model metadata schema-qualified."""
     monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
     get_settings.cache_clear()
     schema = postgres_schema_name()
     engine = create_engine(
@@ -92,6 +94,7 @@ def api_client(
         yield db_session
 
     monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
     get_settings.cache_clear()
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = stub_get_current_user
