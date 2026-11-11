@@ -17,6 +17,13 @@ from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import StreamOutcome
 from app.api.deps import require_permissions
 from app.api.execution import execution_bundle
+from app.api.execution_records import (
+    CANCELLED,
+    FAILED,
+    SUCCEEDED,
+    finalize_execution_best_effort,
+    start_execution_or_503,
+)
 from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
 from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
@@ -27,6 +34,7 @@ from app.schemas.chat_message import (
     ChatMessageCreateResult,
     ChatMessageListOut,
     StreamDone,
+    StreamError,
     StreamEvent,
     format_sse,
 )
@@ -36,6 +44,7 @@ from app.schemas.chat_session import (
     ChatSessionOut,
 )
 from app.services import agent_access as access_service
+from app.services import agent_executions as execution_service
 from app.services import agents as agent_service
 from app.services import chat_messages as message_service
 from app.services import chat_sessions as session_service
@@ -260,12 +269,23 @@ async def create_message(
             agent_id=chat_session.agent_id,
         )
         owned_session_id = chat_session.id
+        agent_id = agent.id
         execution_config, tool_auth = execution_bundle(
             agent,
             user_id=user.user_id,
             permissions=user.permissions,
         )
 
+    execution_uuid = uuid.uuid4()
+    monotonic_start = start_execution_or_503(
+        request,
+        execution_id=execution_uuid,
+        user_id=user.user_id,
+        agent_id=agent_id,
+        session_id=owned_session_id,
+    )
+    terminal_status: str | None = None
+    error_summary: str | None = None
     try:
         execution_id, message = await message_service.post_user_message(
             content=body.content,
@@ -273,13 +293,22 @@ async def create_message(
             session_id=owned_session_id,
             tool_auth=tool_auth,
             execution_config=execution_config,
+            execution_id=execution_uuid,
         )
+        terminal_status = SUCCEEDED
+    except asyncio.CancelledError:
+        terminal_status = CANCELLED
+        raise
     except AgentNotConfiguredError as exc:
+        terminal_status = FAILED
+        error_summary = execution_service.sanitize_error_summary(str(exc))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
     except AgentExecutionError as exc:
+        terminal_status = FAILED
+        error_summary = execution_service.sanitize_error_summary(str(exc))
         detail: str | dict[str, str] = str(exc)
         if exc.execution_id is not None:
             detail = {"message": str(exc), "execution_id": exc.execution_id}
@@ -287,6 +316,15 @@ async def create_message(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
         ) from exc
+    finally:
+        if terminal_status is not None:
+            finalize_execution_best_effort(
+                request,
+                execution_id=execution_uuid,
+                status=terminal_status,
+                monotonic_start=monotonic_start,
+                error_summary=error_summary,
+            )
 
     _touch_session_activity(request, owned_session_id)
     # Execute-only responses already return only the current-turn assistant message.
@@ -335,6 +373,7 @@ async def stream_message(
             agent_id=chat_session.agent_id,
         )
         owned_session_id = chat_session.id
+        agent_id = agent.id
         # Preflight before StreamingResponse so config failures are HTTP 503.
         execution_config, tool_auth = execution_bundle(
             agent,
@@ -342,10 +381,20 @@ async def stream_message(
             permissions=user.permissions,
         )
 
+    execution_uuid = uuid.uuid4()
+    # Persist running before returning StreamingResponse so insert failures stay HTTP 503.
+    monotonic_start = start_execution_or_503(
+        request,
+        execution_id=execution_uuid,
+        user_id=user.user_id,
+        agent_id=agent_id,
+        session_id=owned_session_id,
+    )
     outcome = StreamOutcome()
 
     async def _events():
         queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
+        stream_error_summary: str | None = None
 
         async def _produce() -> None:
             try:
@@ -356,6 +405,7 @@ async def stream_message(
                     tool_auth=tool_auth,
                     execution_config=execution_config,
                     outcome=outcome,
+                    execution_id=execution_uuid,
                 ):
                     queue.put_nowait(event)
             except asyncio.CancelledError:
@@ -373,18 +423,44 @@ async def stream_message(
                 item = await queue.get()
                 if item is None:
                     break
+                if isinstance(item, StreamError):
+                    stream_error_summary = item.message
                 yield format_sse(item)
-            if outcome.failed or outcome.message is None or disconnected.is_set():
-                return
-            _touch_session_activity(request, owned_session_id)
-            await asyncio.sleep(0)
-            if disconnected.is_set():
-                return
-            # SSE done payload is the current-turn assistant message only.
-            yield format_sse(
-                StreamDone(execution_id=outcome.execution_id, message=outcome.message),
-            )
+            # Completion boundary: graph success → succeeded even if client
+            # disconnects during finalization or delivery of done.
+            if outcome.message is not None and not outcome.failed:
+                if not disconnected.is_set():
+                    _touch_session_activity(request, owned_session_id)
+                    await asyncio.sleep(0)
+                    if not disconnected.is_set():
+                        # SSE done payload is the current-turn assistant message only.
+                        yield format_sse(
+                            StreamDone(
+                                execution_id=outcome.execution_id,
+                                message=outcome.message,
+                            ),
+                        )
         finally:
+            # Derive terminal status from outcome so cancel during delivery cannot
+            # overwrite a successful graph completion with cancelled.
+            if outcome.message is not None and not outcome.failed:
+                terminal_status = SUCCEEDED
+                terminal_error = None
+            elif outcome.failed:
+                terminal_status = FAILED
+                terminal_error = execution_service.sanitize_error_summary(
+                    stream_error_summary,
+                )
+            else:
+                terminal_status = CANCELLED
+                terminal_error = None
+            finalize_execution_best_effort(
+                request,
+                execution_id=execution_uuid,
+                status=terminal_status,
+                monotonic_start=monotonic_start,
+                error_summary=terminal_error,
+            )
             watcher.cancel()
             if not producer.done():
                 producer.cancel()

@@ -51,6 +51,7 @@ async def post_user_message(
     tool_auth: ToolAuthContext,
     execution_config: AgentExecutionConfig,
     llm: BaseChatModel | None = None,
+    execution_id: uuid.UUID | None = None,
 ) -> tuple[str, ChatMessageOut]:
     """Run a durable agent turn for the session; return execution_id and assistant message."""
     thread_id = thread_id_for_session(session_id)
@@ -61,6 +62,7 @@ async def post_user_message(
         llm=llm,
         checkpointer=checkpointer,
         thread_id=thread_id,
+        execution_id=execution_id,
     )
     return result.execution_id, ChatMessageOut(role="assistant", content=result.reply)
 
@@ -74,6 +76,7 @@ async def stream_user_message(
     execution_config: AgentExecutionConfig,
     outcome: StreamOutcome,
     llm: BaseChatModel | None = None,
+    execution_id: uuid.UUID | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream a durable turn. The caller emits ``done`` after a successful outcome."""
     thread_id = thread_id_for_session(session_id)
@@ -85,5 +88,6 @@ async def stream_user_message(
         checkpointer=checkpointer,
         thread_id=thread_id,
         outcome=outcome,
+        execution_id=execution_id,
     ):
         yield event

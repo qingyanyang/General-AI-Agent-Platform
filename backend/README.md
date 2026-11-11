@@ -252,6 +252,23 @@ curl -N http://localhost:8000/sessions/<session-uuid>/messages/stream \
 
 `POST /agents/run` remains available for ad-hoc/stateless invokes (and optional `session_id` from #12). It requires the same bearer token.
 
+### Agent execution history (#21)
+
+Each successful preflight on `POST /agents/run`, `POST /sessions/{id}/messages`, and `POST /sessions/{id}/messages/stream` inserts a metadata row (`running`) **before** the model runs (and before SSE starts). Terminal updates are idempotent (`WHERE status='running'` only).
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/executions` | `agents:read` — caller's own rows (`limit`/`cursor`, filters `status`, `agent_id`, `session_id`) |
+| `GET` | `/executions/{id}` | `agents:read` — owned row or **404** |
+
+Ownership filters rows; it does **not** replace platform `agents:read`. Users without an agent `can_view` grant who still hold `agents:read` can list/get **their own** runs. `agent-access:manage` does **not** grant cross-user history (future permission if needed).
+
+Rows store metadata only (ids, status, timestamps, `duration_ms`, sanitized `error_summary`) — **not** conversation content, prompts, tool output, or provider payloads. `langsmith_run_id` equals the execution UUID and is a **correlation id**; it does not guarantee a LangSmith trace exists.
+
+`duration_ms` uses a monotonic clock; `started_at` / `completed_at` are UTC. While `running`, `completed_at`, `duration_ms`, and `error_summary` stay null. Process crashes or failed finalization can leave rows `running`; automatic reconciliation is out of scope. Graph success is recorded as `succeeded` even if the client disconnects during delivery of `done`; `cancelled` is used when cancellation interrupts execution.
+
+Failed initial insert → **503** and the model is never invoked. Finalization failures are logged and do not turn a successful reply into an error response.
+
 ### Migrations
 
 Alembic creates the schema **before** the version table (`alembic/env.py`), then applies revisions:

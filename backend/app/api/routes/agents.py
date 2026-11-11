@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import contextmanager
 from typing import Annotated
@@ -15,6 +16,13 @@ from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import run_agent
 from app.api.deps import require_permissions
 from app.api.execution import execution_bundle
+from app.api.execution_records import (
+    CANCELLED,
+    FAILED,
+    SUCCEEDED,
+    finalize_execution_best_effort,
+    start_execution_or_503,
+)
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -33,6 +41,7 @@ from app.schemas.agent import (
 )
 from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
 from app.services import agent_access as access_service
+from app.services import agent_executions as execution_service
 from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
 
@@ -220,6 +229,9 @@ async def agents_run(
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
 ) -> AgentRunResponse:
+    session_id: uuid.UUID | None = None
+    checkpointer = None
+    thread_id: str | None = None
     try:
         if body.session_id is None:
             agent_id = get_settings().agent_id
@@ -234,11 +246,6 @@ async def agents_run(
                     user_id=user.user_id,
                     permissions=user.permissions,
                 )
-            result = await run_agent(
-                body.message,
-                tool_auth=tool_auth,
-                execution_config=execution_config,
-            )
         else:
             checkpointer = getattr(request.app.state, "checkpointer", None)
             if checkpointer is None:
@@ -252,6 +259,7 @@ async def agents_run(
                     user_id=user.user_id,
                     session_id=body.session_id,
                 )
+                session_id = chat_session.id
                 agent_id = chat_session.agent_id
                 agent, include_history = _ensure_executable_agent(
                     db,
@@ -264,13 +272,6 @@ async def agents_run(
                     permissions=user.permissions,
                 )
                 thread_id = thread_id_for_session(chat_session.id)
-            result = await run_agent(
-                body.message,
-                tool_auth=tool_auth,
-                execution_config=execution_config,
-                checkpointer=checkpointer,
-                thread_id=thread_id,
-            )
     except HTTPException:
         raise
     except AgentNotConfiguredError as exc:
@@ -278,7 +279,40 @@ async def agents_run(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+
+    execution_id = uuid.uuid4()
+    monotonic_start = start_execution_or_503(
+        request,
+        execution_id=execution_id,
+        user_id=user.user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    terminal_status: str | None = None
+    error_summary: str | None = None
+    try:
+        result = await run_agent(
+            body.message,
+            tool_auth=tool_auth,
+            execution_config=execution_config,
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+            execution_id=execution_id,
+        )
+        terminal_status = SUCCEEDED
+    except asyncio.CancelledError:
+        terminal_status = CANCELLED
+        raise
+    except AgentNotConfiguredError as exc:
+        terminal_status = FAILED
+        error_summary = execution_service.sanitize_error_summary(str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except AgentExecutionError as exc:
+        terminal_status = FAILED
+        error_summary = execution_service.sanitize_error_summary(str(exc))
         detail: str | dict[str, str] = str(exc)
         if exc.execution_id is not None:
             detail = {"message": str(exc), "execution_id": exc.execution_id}
@@ -286,6 +320,15 @@ async def agents_run(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
         ) from exc
+    finally:
+        if terminal_status is not None:
+            finalize_execution_best_effort(
+                request,
+                execution_id=execution_id,
+                status=terminal_status,
+                monotonic_start=monotonic_start,
+                error_summary=error_summary,
+            )
 
     if include_history:
         messages = [
