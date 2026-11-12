@@ -7,6 +7,7 @@ from collections.abc import Generator
 
 import pytest
 from app.agents.graph import clear_agent_graph_cache
+from app.agents.tools.mcp import clear_mcp_catalog, set_mcp_http_client_factory
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -26,10 +27,17 @@ from tests.auth_helpers import stub_get_current_user
 
 
 @pytest.fixture(autouse=True)
-def _clear_agent_graph_cache() -> Generator[None, None, None]:
+def _clear_agent_graph_cache(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     clear_agent_graph_cache()
+    clear_mcp_catalog()
+    set_mcp_http_client_factory(None)
+    monkeypatch.setenv("APPROVED_MCP_SERVERS", "")
+    get_settings.cache_clear()
     yield
     clear_agent_graph_cache()
+    clear_mcp_catalog()
+    set_mcp_http_client_factory(None)
+    get_settings.cache_clear()
 
 
 @pytest.fixture

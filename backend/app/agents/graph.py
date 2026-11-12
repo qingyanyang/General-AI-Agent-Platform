@@ -19,6 +19,8 @@ from app.agents.errors import AgentNotConfiguredError
 from app.agents.state import AgentState
 from app.agents.tool_policy import ToolAuthorizationError, get_tool_auth_context
 from app.agents.tools import (
+    ToolConnectionError,
+    ToolExecutionError,
     ToolNotRegisteredError,
     ToolRegistry,
     ToolValidationError,
@@ -36,6 +38,8 @@ inflight_node_tasks: ContextVar[set[asyncio.Task[Any]] | None] = ContextVar(
 )
 
 _AUTH_DENIED_CONTENT = "Error: tool '{name}' is not authorized"
+_CONNECTION_ERROR_CONTENT = "Tool connection error for '{name}'"
+_EXECUTION_ERROR_CONTENT = "Tool execution error for '{name}'"
 
 
 def _note_inflight_task() -> None:
@@ -184,6 +188,24 @@ async def _execute_registered_tools(
             outputs.append(
                 ToolMessage(
                     content=f"Validation error for tool '{name}': {exc}",
+                    tool_call_id=call_id,
+                    name=name,
+                )
+            )
+        except ToolConnectionError:
+            logger.info("Tool connection failed for %s", name)
+            outputs.append(
+                ToolMessage(
+                    content=_CONNECTION_ERROR_CONTENT.format(name=name),
+                    tool_call_id=call_id,
+                    name=name,
+                )
+            )
+        except ToolExecutionError:
+            logger.info("Tool execution failed for %s", name)
+            outputs.append(
+                ToolMessage(
+                    content=_EXECUTION_ERROR_CONTENT.format(name=name),
                     tool_call_id=call_id,
                     name=name,
                 )

@@ -18,4 +18,20 @@ class ToolNotRegisteredError(ToolError):
 
 
 class ToolValidationError(ToolError):
-    """Raised when tool arguments fail schema validation."""
+    """Raised when tool arguments or successful outputs fail schema validation."""
+
+
+class ToolConnectionError(ToolError):
+    """Transport, connectivity, or deadline failure. The remote tool did not report a result."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Tool connection error for '{name}'")
+
+
+class ToolExecutionError(ToolError):
+    """The remote tool ran and reported a failure, or returned content we will not pass on."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Tool execution error for '{name}'")
