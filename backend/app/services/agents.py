@@ -71,6 +71,7 @@ class AgentExecutionConfig:
     temperature: float | None
     tool_names: tuple[str, ...]
     skill_names: tuple[str, ...] = ()
+    approval_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,7 @@ def _default_create_config_fields() -> dict[str, object]:
         "temperature": temperature,
         "tool_names": [],
         "skill_names": [],
+        "approval_tool_names": [],
     }
 
 
@@ -169,6 +171,7 @@ def ensure_default_agent(db: Session) -> Agent:
         temperature=_MIGRATION_DEFAULT_TEMPERATURE,
         tool_names=list(_MIGRATION_DEFAULT_TOOLS),
         skill_names=[],
+        approval_tool_names=[],
     )
     db.add(agent)
     db.commit()
@@ -206,6 +209,7 @@ def create_agent(
         temperature=config_fields["temperature"],  # type: ignore[arg-type]
         tool_names=list(config_fields["tool_names"]),  # type: ignore[arg-type]
         skill_names=list(config_fields["skill_names"]),  # type: ignore[arg-type]
+        approval_tool_names=list(config_fields["approval_tool_names"]),  # type: ignore[arg-type]
     )
     db.add(agent)
     try:
@@ -295,6 +299,7 @@ def update_configuration(
     temperature: float | None,
     tool_names: list[str],
     skill_names: list[str],
+    approval_tool_names: list[str],
     caller_permissions: frozenset[str],
 ) -> Agent:
     """Replace configuration under a row lock; check tool-add permissions vs old set."""
@@ -326,6 +331,11 @@ def update_configuration(
         if not skill_registry.has(name):
             raise AgentValidationError(f"unknown skill '{name}'")
 
+    assigned = set(tool_names)
+    for name in approval_tool_names:
+        if name not in assigned:
+            raise AgentValidationError(f"approval tool '{name}' is not in tool_names")
+
     stmt = select(Agent).where(Agent.id == agent_id).with_for_update()
     agent = db.scalar(stmt)
     if agent is None:
@@ -344,6 +354,7 @@ def update_configuration(
     agent.temperature = temperature
     agent.tool_names = list(tool_names)
     agent.skill_names = list(skill_names)
+    agent.approval_tool_names = list(approval_tool_names)
     agent.updated_at = _utcnow()
     db.commit()
     db.refresh(agent)
@@ -354,6 +365,7 @@ def snapshot_execution_config(agent: Agent) -> AgentExecutionConfig:
     """Build an immutable config snapshot from a loaded Agent row."""
     tools = tuple(str(name) for name in (agent.tool_names or []))
     skills = tuple(str(name) for name in (agent.skill_names or []))
+    approvals = tuple(str(name) for name in (agent.approval_tool_names or []))
     return AgentExecutionConfig(
         agent_id=agent.id,
         system_prompt=agent.system_prompt or "",
@@ -362,6 +374,7 @@ def snapshot_execution_config(agent: Agent) -> AgentExecutionConfig:
         temperature=agent.temperature,
         tool_names=tools,
         skill_names=skills,
+        approval_tool_names=approvals,
     )
 
 
@@ -397,6 +410,13 @@ def validate_execution_config(config: AgentExecutionConfig) -> None:
         if not skill_registry.has(name):
             raise AgentNotConfiguredError(
                 f"Agent configuration is invalid: skill '{name}' is not registered",
+            )
+
+    assigned = set(config.tool_names)
+    for name in config.approval_tool_names:
+        if name not in assigned:
+            raise AgentNotConfiguredError(
+                f"Agent configuration is invalid: approval tool '{name}' is not assigned",
             )
 
     if not settings.resolve_llm_api_key_for_provider(config.llm_provider):

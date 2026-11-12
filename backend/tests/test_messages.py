@@ -8,9 +8,9 @@ from datetime import datetime
 
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.messages import message_content_text, message_role
-from app.agents.runtime import run_agent
+from app.agents.runtime import AgentResult, run_agent
 from app.core.config import get_settings
-from app.schemas.chat_message import MESSAGE_CONTENT_MAX_LENGTH, ChatMessageOut
+from app.schemas.chat_message import MESSAGE_CONTENT_MAX_LENGTH
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from pytest import MonkeyPatch
@@ -88,7 +88,7 @@ def test_post_preserves_internal_formatting(
 
     async def fake_post(*, content: str, **kwargs):
         captured["content"] = content
-        return "exec-1", ChatMessageOut(role="assistant", content="ok")
+        return AgentResult(reply="ok", messages=[], execution_id="exec-1")
 
     monkeypatch.setattr(
         "app.api.routes.sessions.message_service.post_user_message",
@@ -295,9 +295,7 @@ def test_post_bumps_last_activity(
     before = datetime.fromisoformat(created["last_activity_at"])
 
     async def fake_post(**kwargs):
-        from app.schemas.chat_message import ChatMessageOut
-
-        return str(uuid.uuid4()), ChatMessageOut(role="assistant", content="ok")
+        return AgentResult(reply="ok", messages=[], execution_id=str(uuid.uuid4()))
 
     monkeypatch.setattr(
         "app.api.routes.sessions.message_service.post_user_message",
@@ -326,9 +324,7 @@ def test_touch_failure_still_returns_200(
     _with_saver(api_client)
 
     async def fake_post(**kwargs):
-        from app.schemas.chat_message import ChatMessageOut
-
-        return str(uuid.uuid4()), ChatMessageOut(role="assistant", content="ok")
+        return AgentResult(reply="ok", messages=[], execution_id=str(uuid.uuid4()))
 
     def boom_touch(db, session) -> None:
         raise RuntimeError("db write failed")

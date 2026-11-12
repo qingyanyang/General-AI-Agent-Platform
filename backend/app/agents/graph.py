@@ -1,4 +1,4 @@
-"""LangGraph StateGraph: LLM node, ToolNode, and conditional routing."""
+"""LangGraph StateGraph: LLM node, frozen tool batch, and conditional routing."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import tools_condition
+from langgraph.types import interrupt
 from pydantic import ValidationError
 
 from app.agents.errors import AgentNotConfiguredError
@@ -37,6 +38,8 @@ inflight_node_tasks: ContextVar[set[asyncio.Task[Any]] | None] = ContextVar(
     default=None,
 )
 
+_APPROVAL_UNAVAILABLE = "Error: tool '{name}' requires approval and this run has no session"
+_REJECTED_CONTENT = "Tool call rejected"
 _AUTH_DENIED_CONTENT = "Error: tool '{name}' is not authorized"
 _CONNECTION_ERROR_CONTENT = "Tool connection error for '{name}'"
 _EXECUTION_ERROR_CONTENT = "Tool execution error for '{name}'"
@@ -125,107 +128,153 @@ def _tool_call_id(tool_call: dict[str, Any] | Any) -> str:
     return str(getattr(tool_call, "id", "") or "")
 
 
+def _freeze_tool_batch(
+    state: AgentState,
+    approval_tools: frozenset[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Snapshot tool calls once. Resume must not rebuild this from live config."""
+    existing = state.get("approval_batch") or []
+    if existing:
+        return {}
+    last = state["messages"][-1] if state.get("messages") else None
+    if not isinstance(last, AIMessage) or not last.tool_calls:
+        return {"approval_batch": []}
+    batch: list[dict[str, Any]] = []
+    for tool_call in last.tool_calls:
+        name = _tool_call_name(tool_call)
+        batch.append(
+            {
+                "tool_call_id": _tool_call_id(tool_call),
+                "name": name,
+                "arguments": _tool_call_args(tool_call),
+                "requires_approval": name in approval_tools,
+            }
+        )
+    return {"approval_batch": batch}
+
+
 async def _execute_registered_tools(
     state: AgentState,
     registry: ToolRegistry,
-) -> dict[str, list[ToolMessage]]:
-    """Run only registry-approved tool calls; return ToolMessages (including errors)."""
-    last = state["messages"][-1]
-    if not isinstance(last, AIMessage) or not last.tool_calls:
-        return {"messages": []}
+    *,
+    pausable: bool,
+) -> dict[str, list[Any]]:
+    """Run the frozen batch. Approvals are collected before any tool runs."""
+    batch = list(state.get("approval_batch") or [])
+    if not batch:
+        return {"messages": [], "approval_batch": []}
+
+    decisions: dict[str, str] = {}
+    if pausable:
+        for item in batch:
+            if not item["requires_approval"]:
+                continue
+            # Outside the tool error handlers: a raised interrupt must pause the node.
+            decision = interrupt(
+                {
+                    "tool_call_id": item["tool_call_id"],
+                    "tool_name": item["name"],
+                    "arguments": item["arguments"],
+                }
+            )
+            decisions[item["tool_call_id"]] = str(decision)
 
     context = get_tool_auth_context()
     outputs: list[ToolMessage] = []
-    for tool_call in last.tool_calls:
-        name = _tool_call_name(tool_call)
-        call_id = _tool_call_id(tool_call)
-        args = _tool_call_args(tool_call)
-
-        if not registry.has(name):
+    for item in batch:
+        name = str(item["name"])
+        call_id = str(item["tool_call_id"])
+        args = dict(item["arguments"])
+        if item["requires_approval"] and not pausable:
             outputs.append(
                 ToolMessage(
-                    content=f"Error: tool '{name}' is not registered and cannot be executed",
+                    content=_APPROVAL_UNAVAILABLE.format(name=name),
                     tool_call_id=call_id,
                     name=name or "unknown",
                 )
             )
             continue
+        if item["requires_approval"] and decisions.get(call_id) != "approve":
+            outputs.append(
+                ToolMessage(
+                    content=_REJECTED_CONTENT,
+                    tool_call_id=call_id,
+                    name=name or "unknown",
+                )
+            )
+            continue
+        outputs.append(await _invoke_tool(registry, name, call_id, args, context))
+    return {"messages": outputs, "approval_batch": []}
 
-        try:
-            result = await registry.aexecute(name, args, context=context)
-            outputs.append(
-                ToolMessage(
-                    content=str(result),
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except ToolAuthorizationError as exc:
-            agent_id = context.agent_id if context is not None else None
-            logger.info(
-                "Tool authorization denied for %s agent_id=%s reason=%s",
-                name,
-                agent_id,
-                exc.reason,
-            )
-            outputs.append(
-                ToolMessage(
-                    content=_AUTH_DENIED_CONTENT.format(name=name),
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except ToolNotRegisteredError:
-            outputs.append(
-                ToolMessage(
-                    content=f"Error: tool '{name}' is not registered and cannot be executed",
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except (ToolValidationError, ValidationError) as exc:
-            logger.info("Tool argument validation failed for %s: %s", name, exc)
-            outputs.append(
-                ToolMessage(
-                    content=f"Validation error for tool '{name}': {exc}",
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except ToolConnectionError:
-            logger.info("Tool connection failed for %s", name)
-            outputs.append(
-                ToolMessage(
-                    content=_CONNECTION_ERROR_CONTENT.format(name=name),
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except ToolExecutionError:
-            logger.info("Tool execution failed for %s", name)
-            outputs.append(
-                ToolMessage(
-                    content=_EXECUTION_ERROR_CONTENT.format(name=name),
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
-        except Exception:  # noqa: BLE001 — keep agent loop alive on tool failure
-            logger.exception("Tool execution failed for %s", name)
-            outputs.append(
-                ToolMessage(
-                    content=f"Tool execution error for '{name}'",
-                    tool_call_id=call_id,
-                    name=name,
-                )
-            )
 
-    return {"messages": outputs}
+async def _invoke_tool(
+    registry: ToolRegistry,
+    name: str,
+    call_id: str,
+    args: dict[str, Any],
+    context: Any,
+) -> ToolMessage:
+    if not registry.has(name):
+        return ToolMessage(
+            content=f"Error: tool '{name}' is not registered and cannot be executed",
+            tool_call_id=call_id,
+            name=name or "unknown",
+        )
+    try:
+        result = await registry.aexecute(name, args, context=context)
+        return ToolMessage(content=str(result), tool_call_id=call_id, name=name)
+    except ToolAuthorizationError as exc:
+        agent_id = context.agent_id if context is not None else None
+        logger.info(
+            "Tool authorization denied for %s agent_id=%s reason=%s",
+            name,
+            agent_id,
+            exc.reason,
+        )
+        return ToolMessage(
+            content=_AUTH_DENIED_CONTENT.format(name=name),
+            tool_call_id=call_id,
+            name=name,
+        )
+    except ToolNotRegisteredError:
+        return ToolMessage(
+            content=f"Error: tool '{name}' is not registered and cannot be executed",
+            tool_call_id=call_id,
+            name=name,
+        )
+    except (ToolValidationError, ValidationError) as exc:
+        logger.info("Tool argument validation failed for %s: %s", name, exc)
+        return ToolMessage(
+            content=f"Validation error for tool '{name}': {exc}",
+            tool_call_id=call_id,
+            name=name,
+        )
+    except ToolConnectionError:
+        logger.info("Tool connection failed for %s", name)
+        return ToolMessage(
+            content=_CONNECTION_ERROR_CONTENT.format(name=name),
+            tool_call_id=call_id,
+            name=name,
+        )
+    except ToolExecutionError:
+        logger.info("Tool execution failed for %s", name)
+        return ToolMessage(
+            content=_EXECUTION_ERROR_CONTENT.format(name=name),
+            tool_call_id=call_id,
+            name=name,
+        )
+    except Exception:  # noqa: BLE001 — keep agent loop alive on tool failure
+        logger.exception("Tool execution failed for %s", name)
+        return ToolMessage(
+            content=f"Tool execution error for '{name}'",
+            tool_call_id=call_id,
+            name=name,
+        )
 
 
 # Production-path cache (llm/registry/prompt defaulted).
-# Keyed by checkpointer + permitted tools + system_prompt.
-_graph_cache: dict[tuple[int | None, frozenset[str], str], CompiledStateGraph] = {}
+# Keyed by checkpointer, permitted tools, approval tools, and system prompt.
+_graph_cache: dict[tuple[int | None, frozenset[str], frozenset[str], str], CompiledStateGraph] = {}
 
 
 def clear_agent_graph_cache() -> None:
@@ -249,6 +298,7 @@ def build_agent_graph(
     registry: ToolRegistry | None = None,
     checkpointer: Any | None = None,
     permitted_tools: frozenset[str] | None = None,
+    approval_tools: frozenset[str] | None = None,
     system_prompt: str = "",
 ) -> CompiledStateGraph:
     """Compile the agent graph using registry-backed tools only.
@@ -269,11 +319,13 @@ def build_agent_graph(
     models are not incorrectly shared.
     """
     permitted = frozenset(permitted_tools or ())
+    approvals = frozenset(approval_tools or ())
     prompt = system_prompt or ""
     use_cache = llm is None and registry is None
-    cache_key: tuple[int | None, frozenset[str], str] = (
+    cache_key: tuple[int | None, frozenset[str], frozenset[str], str] = (
         id(checkpointer) if checkpointer is not None else None,
         permitted,
+        approvals,
         prompt,
     )
     if use_cache and cache_key in _graph_cache:
@@ -297,13 +349,27 @@ def build_agent_graph(
 
     async def tools_node(state: AgentState) -> dict:
         _note_inflight_task()
-        return await _execute_registered_tools(state, tool_registry)
+        return await _execute_registered_tools(
+            state,
+            tool_registry,
+            pausable=checkpointer is not None,
+        )
+
+    async def freeze_node(state: AgentState) -> dict:
+        _note_inflight_task()
+        return _freeze_tool_batch(state, approvals)
 
     graph = StateGraph(AgentState)
     graph.add_node("llm", llm_node)
+    graph.add_node("freeze_batch", freeze_node)
     graph.add_node("tools", tools_node)
     graph.add_edge(START, "llm")
-    graph.add_conditional_edges("llm", tools_condition, {"tools": "tools", END: END})
+    graph.add_conditional_edges(
+        "llm",
+        tools_condition,
+        {"tools": "freeze_batch", END: END},
+    )
+    graph.add_edge("freeze_batch", "tools")
     graph.add_edge("tools", "llm")
     compiled = graph.compile() if checkpointer is None else graph.compile(checkpointer=checkpointer)
     if use_cache:

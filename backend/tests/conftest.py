@@ -17,6 +17,7 @@ from app.models.agent_access_grant import AgentAccessGrant  # noqa: F401
 from app.models.agent_execution import AgentExecution  # noqa: F401
 from app.models.base import Base, postgres_schema_name
 from app.models.chat_session import ChatSession  # noqa: F401
+from app.models.session_run_gate import SessionRunGate  # noqa: F401
 from app.services.agents import ensure_default_agent
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -116,4 +117,10 @@ def api_client(
 def checkpoint_test_database_url() -> str | None:
     """Dedicated Postgres URL for checkpointer integration tests (no app DB fallback)."""
     value = os.environ.get("CHECKPOINT_TEST_DATABASE_URL", "").strip()
+    return value or None
+
+
+def business_database_url() -> str | None:
+    """Dedicated Postgres URL for business-table tests (no app DB or checkpoint DB fallback)."""
+    value = os.environ.get("TEST_DATABASE_URL", "").strip()
     return value or None

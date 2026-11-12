@@ -166,21 +166,8 @@ def test_only_new_human_message_is_passed_each_turn(monkeypatch: MonkeyPatch) ->
     captured: list[list] = []
     original_build = runtime_mod.build_agent_graph
 
-    def tracking_build(
-        *,
-        llm=None,
-        registry=None,
-        checkpointer=None,
-        permitted_tools=None,
-        system_prompt="",
-    ):
-        graph = original_build(
-            llm=llm,
-            registry=registry,
-            checkpointer=checkpointer,
-            permitted_tools=permitted_tools,
-            system_prompt=system_prompt,
-        )
+    def tracking_build(**kwargs):
+        graph = original_build(**kwargs)
         original_ainvoke = graph.ainvoke
 
         async def wrapped_ainvoke(input_data, config=None, **kwargs):

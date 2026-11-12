@@ -82,6 +82,18 @@ class StreamDone(BaseModel):
     message: ChatMessageOut
 
 
+class StreamApprovalRequired(BaseModel):
+    """The run paused before a gated tool. The stream ends without ``done`` or ``error``."""
+
+    type: Literal["approval.required"] = "approval.required"
+    execution_id: str
+    interrupt_id: str
+    checkpoint_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments: dict[str, object]
+
+
 class StreamError(BaseModel):
     """Graph or model failure. Client cancellation does not use this event."""
 
@@ -90,7 +102,14 @@ class StreamError(BaseModel):
     message: str
 
 
-StreamEvent = StreamMessageDelta | StreamToolStart | StreamToolEnd | StreamDone | StreamError
+StreamEvent = (
+    StreamMessageDelta
+    | StreamToolStart
+    | StreamToolEnd
+    | StreamApprovalRequired
+    | StreamDone
+    | StreamError
+)
 
 
 def format_sse(event: StreamEvent) -> str:

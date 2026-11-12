@@ -14,6 +14,7 @@ from app.models.base import Base, postgres_schema_name
 
 class AgentExecutionStatus(StrEnum):
     RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -35,6 +36,11 @@ class AgentExecution(Base):
     agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
     session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Completed in-process segments only. Crash gaps stay unknown, not estimated.
+    active_duration_ms: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    running_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

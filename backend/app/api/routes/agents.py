@@ -8,20 +8,25 @@ from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
-from app.agents.runtime import run_agent
+from app.agents.runtime import read_pending_despite_cancellation, run_agent
 from app.api.deps import require_permissions
 from app.api.execution import execution_bundle
 from app.api.execution_records import (
     CANCELLED,
     FAILED,
     SUCCEEDED,
+    begin_gated_run_or_http,
     finalize_execution_best_effort,
+    pause_for_approval_bounded,
     start_execution_or_503,
+    start_lease_heartbeat,
+    stop_lease_heartbeat,
 )
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
@@ -40,6 +45,7 @@ from app.schemas.agent import (
     AgentUpdate,
 )
 from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
+from app.schemas.approval import PendingApproval
 from app.services import agent_access as access_service
 from app.services import agent_executions as execution_service
 from app.services import agents as agent_service
@@ -162,6 +168,7 @@ def _configuration_out(agent: Agent) -> AgentConfigurationOut:
         temperature=agent.temperature,
         tool_names=[str(name) for name in (agent.tool_names or [])],
         skill_names=[str(name) for name in (agent.skill_names or [])],
+        approval_tool_names=[str(name) for name in (agent.approval_tool_names or [])],
     )
 
 
@@ -229,7 +236,7 @@ async def agents_run(
     body: AgentRunRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
-) -> AgentRunResponse:
+) -> AgentRunResponse | JSONResponse:
     session_id: uuid.UUID | None = None
     checkpointer = None
     thread_id: str | None = None
@@ -282,18 +289,36 @@ async def agents_run(
         ) from exc
 
     execution_id = uuid.uuid4()
-    monotonic_start = start_execution_or_503(
-        request,
-        execution_id=execution_id,
-        user_id=user.user_id,
-        agent_id=agent_id,
-        session_id=session_id,
-    )
+    gated = session_id is not None
+    if gated:
+        assert session_id is not None
+        monotonic_start = begin_gated_run_or_http(
+            request,
+            execution_id=execution_id,
+            user_id=user.user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        heartbeat = start_lease_heartbeat(
+            request,
+            session_id=session_id,
+            execution_id=execution_id,
+        )
+    else:
+        monotonic_start = start_execution_or_503(
+            request,
+            execution_id=execution_id,
+            user_id=user.user_id,
+            agent_id=agent_id,
+            session_id=None,
+        )
+        heartbeat = None
     # Default to failed so an unexpected exception still leaves a terminal row.
     terminal_status = FAILED
     error_summary: str | None = execution_service.sanitize_error_summary(
         "Agent execution failed",
     )
+    paused: PendingApproval | None = None
     try:
         result = await run_agent(
             body.message,
@@ -303,11 +328,22 @@ async def agents_run(
             thread_id=thread_id,
             execution_id=execution_id,
         )
-        terminal_status = SUCCEEDED
-        error_summary = None
+        if result.pending is not None:
+            paused = result.pending
+        else:
+            terminal_status = SUCCEEDED
+            error_summary = None
     except asyncio.CancelledError:
-        terminal_status = CANCELLED
-        error_summary = None
+        if gated and checkpointer is not None and thread_id is not None:
+            paused = await read_pending_despite_cancellation(
+                checkpointer=checkpointer,
+                thread_id=thread_id,
+                execution_id=str(execution_id),
+                execution_config=execution_config,
+            )
+        if paused is None:
+            terminal_status = CANCELLED
+            error_summary = None
         raise
     except AgentNotConfiguredError as exc:
         terminal_status = FAILED
@@ -327,12 +363,31 @@ async def agents_run(
             detail=detail,
         ) from exc
     finally:
-        finalize_execution_best_effort(
-            request,
-            execution_id=execution_id,
-            status=terminal_status,
-            monotonic_start=monotonic_start,
-            error_summary=error_summary,
+        await stop_lease_heartbeat(heartbeat)
+        if paused is not None and session_id is not None:
+            pause_for_approval_bounded(
+                request,
+                session_id=session_id,
+                execution_id=execution_id,
+                monotonic_start=monotonic_start,
+                checkpoint_id=paused.checkpoint_id,
+                interrupt_id=paused.interrupt_id,
+                tool_call_id=paused.tool_call_id,
+            )
+        else:
+            finalize_execution_best_effort(
+                request,
+                execution_id=execution_id,
+                status=terminal_status,
+                monotonic_start=monotonic_start,
+                error_summary=error_summary,
+                session_id=session_id,
+            )
+
+    if paused is not None:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=paused.model_dump(mode="json"),
         )
 
     if include_history:
@@ -396,6 +451,7 @@ def put_agent_configuration(
             temperature=body.temperature,
             tool_names=body.tool_names,
             skill_names=body.skill_names,
+            approval_tool_names=body.approval_tool_names,
             caller_permissions=user.permissions,
         )
     except agent_service.AgentNotFoundError as exc:
