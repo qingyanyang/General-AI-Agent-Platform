@@ -99,6 +99,7 @@ async def run_agent(
     llm: BaseChatModel | None = None,
     checkpointer: Any | None = None,
     thread_id: str | None = None,
+    execution_id: uuid.UUID | None = None,
 ) -> AgentResult:
     """Run the agent graph for a user message.
 
@@ -123,8 +124,8 @@ async def run_agent(
             "Conversation persistence is not configured",
         )
 
-    execution_id = uuid.uuid4()
-    execution_id_text = str(execution_id)
+    resolved_execution_id = execution_id if execution_id is not None else uuid.uuid4()
+    execution_id_text = str(resolved_execution_id)
     use_checkpointer = thread_id is not None
     registry = create_default_registry()
     permitted = permitted_tool_names(registry, tool_auth)
@@ -140,7 +141,7 @@ async def run_agent(
             )
             config = build_run_config(
                 settings,
-                execution_id,
+                resolved_execution_id,
                 thread_id=thread_id if use_checkpointer else None,
             )
             with langsmith_tracing(settings):
@@ -372,6 +373,7 @@ async def stream_agent(
     checkpointer: Any | None = None,
     thread_id: str | None = None,
     outcome: StreamOutcome | None = None,
+    execution_id: uuid.UUID | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream one agent turn.
 
@@ -401,8 +403,8 @@ async def stream_agent(
     _require_checkpointer_for_thread(thread_id, checkpointer)
 
     settings = get_settings()
-    execution_id = uuid.uuid4()
-    outcome.execution_id = str(execution_id)
+    resolved_execution_id = execution_id if execution_id is not None else uuid.uuid4()
+    outcome.execution_id = str(resolved_execution_id)
     outcome.failed = False
     outcome.message = None
     use_checkpointer = thread_id is not None
@@ -428,7 +430,7 @@ async def stream_agent(
             )
             config = build_run_config(
                 settings,
-                execution_id,
+                resolved_execution_id,
                 thread_id=thread_id if use_checkpointer else None,
             )
             with langsmith_tracing(settings):
