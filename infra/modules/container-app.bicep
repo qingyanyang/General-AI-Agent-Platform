@@ -89,6 +89,12 @@ param containerMemory string = '0.5Gi'
 @description('CORS allowed origins (comma-separated).')
 param corsAllowedOrigins string = 'http://localhost:5173'
 
+@description('Auth0 tenant hostname. Empty omits AUTH0_DOMAIN (protected routes return 503).')
+param auth0Domain string = ''
+
+@description('Auth0 API audience. Empty omits AUTH0_AUDIENCE.')
+param auth0Audience string = ''
+
 @description('Resource tags.')
 param tags object = {}
 
@@ -182,6 +188,22 @@ var llmApiKeyEnv = enableLlmApiKey ? [
 ] : []
 
 var llmEnv = concat(llmProviderEnv, llmModelEnv, llmBaseUrlEnv, llmApiKeyEnv)
+
+var auth0DomainEnv = empty(auth0Domain) ? [] : [
+  {
+    name: 'AUTH0_DOMAIN'
+    value: auth0Domain
+  }
+]
+
+var auth0AudienceEnv = empty(auth0Audience) ? [] : [
+  {
+    name: 'AUTH0_AUDIENCE'
+    value: auth0Audience
+  }
+]
+
+var authEnv = concat(auth0DomainEnv, auth0AudienceEnv)
 
 // Project name is not set here — FastAPI defaults to agent-platform-{ENVIRONMENT}.
 var langsmithEnv = enableLangsmithTracing ? concat(
@@ -277,7 +299,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               timeoutSeconds: 5
             }
           ]
-          env: concat(baseEnv, llmEnv, langsmithEnv)
+          env: concat(baseEnv, authEnv, llmEnv, langsmithEnv)
         }
       ]
       scale: {
