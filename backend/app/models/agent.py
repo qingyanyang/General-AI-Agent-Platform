@@ -51,3 +51,4 @@ class Agent(Base):
     llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     tool_names: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
+    skill_names: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)

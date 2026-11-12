@@ -71,6 +71,7 @@ def test_get_put_configuration_round_trip(
     assert body["llm_model"] == "deepseek-flash"
     assert body["temperature"] == 1.0
     assert body["tool_names"] == ["echo"]
+    assert body["skill_names"] == []
 
     got = api_client.get(
         "/agents/default/configuration",

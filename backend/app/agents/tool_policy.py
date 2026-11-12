@@ -21,6 +21,8 @@ class ToolAuthContext:
     agent_id: str
     # Persisted agent tool assignments (#20). Empty ⇒ no tools (never all-tools).
     allowed_tools: frozenset[str] = frozenset()
+    # Persisted agent skill assignments (#23). Empty ⇒ no skills / no load_skill.
+    allowed_skills: frozenset[str] = frozenset()
 
 
 class ToolAuthorizationError(Exception):

@@ -32,6 +32,7 @@ def default_execution_config(
     llm_model: str = _DEFAULT_MODEL,
     temperature: float | None = _DEFAULT_TEMPERATURE,
     tool_names: tuple[str, ...] | None = None,
+    skill_names: tuple[str, ...] = (),
 ) -> AgentExecutionConfig:
     """Immutable config snapshot for unit tests that call run_agent / stream_agent."""
     tools = tuple(sorted(BUILTIN_TOOL_NAMES)) if tool_names is None else tool_names
@@ -42,6 +43,7 @@ def default_execution_config(
         llm_model=llm_model,
         temperature=temperature,
         tool_names=tools,
+        skill_names=skill_names,
     )
 
 
@@ -51,6 +53,7 @@ def default_tool_auth(
     agent_id: str = "default",
     permissions: frozenset[str] | None = None,
     allowed_tools: frozenset[str] | None = None,
+    allowed_skills: frozenset[str] = frozenset(),
 ) -> ToolAuthContext:
     """Trusted tool auth for unit tests that invoke run_agent / stream_agent."""
     tools = BUILTIN_TOOL_NAMES if allowed_tools is None else allowed_tools
@@ -59,6 +62,7 @@ def default_tool_auth(
         agent_id=agent_id,
         permissions=(frozenset({PERM_AGENTS_EXECUTE}) if permissions is None else permissions),
         allowed_tools=tools,
+        allowed_skills=allowed_skills,
     )
 
 
@@ -75,6 +79,7 @@ def seed_agent(
     created_by: str = "system",
     description: str | None = None,
     tool_names: list[str] | None = None,
+    skill_names: list[str] | None = None,
     system_prompt: str | None = None,
     llm_provider: str | None = None,
     llm_model: str | None = None,
@@ -92,6 +97,8 @@ def seed_agent(
         agent.status = status
         if tool_names is not None:
             agent.tool_names = list(tool_names)
+        if skill_names is not None:
+            agent.skill_names = list(skill_names)
         if system_prompt is not None:
             agent.system_prompt = system_prompt
         if llm_provider is not None:
@@ -113,6 +120,8 @@ def seed_agent(
             existing.description = description
         if tool_names is not None:
             existing.tool_names = list(tool_names)
+        if skill_names is not None:
+            existing.skill_names = list(skill_names)
         if system_prompt is not None:
             existing.system_prompt = system_prompt
         if llm_provider is not None:
@@ -140,6 +149,7 @@ def seed_agent(
         llm_model=llm_model or _DEFAULT_MODEL,
         temperature=temperature,
         tool_names=list(tool_names) if tool_names is not None else default_tools,
+        skill_names=list(skill_names) if skill_names is not None else [],
     )
     db.add(agent)
     db.commit()

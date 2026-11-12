@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.agents.tools.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
+from app.core.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
 
 # Process-default convenience: DeepSeek + unset/OpenAI default model → flash.
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"

@@ -29,9 +29,9 @@ from app.agents.tools.mcp import (
     set_mcp_http_client_factory,
     validate_instance,
 )
-from app.agents.tools.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
 from app.agents.tools.registry import ToolRegistry
 from app.core.config import Settings
+from app.core.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
 from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.models.agent import Agent
 from fastapi.testclient import TestClient
@@ -302,6 +302,7 @@ def test_empty_catalog_registry_is_builtins_only() -> None:
         "add",
         "multiply",
         "echo",
+        "load_skill",
     }
 
 

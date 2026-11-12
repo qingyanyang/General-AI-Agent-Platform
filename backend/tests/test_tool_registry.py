@@ -95,7 +95,7 @@ def test_omitted_context_raises_authorization_error_not_type_error() -> None:
 def test_default_registry_includes_builtins() -> None:
     registry = create_default_registry()
     tools = {tool.name for tool in registry.get_langchain_tools()}
-    assert tools == {"add", "multiply", "echo"}
+    assert tools == {"add", "multiply", "echo", "load_skill"}
 
 
 def test_langgraph_invokes_registered_tool() -> None:
