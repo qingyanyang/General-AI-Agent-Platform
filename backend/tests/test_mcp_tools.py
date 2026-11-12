@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import urllib.request
 
 import httpx
@@ -28,7 +27,6 @@ from app.agents.tools.mcp import (
     replace_mcp_catalog,
     select_tool_specs,
     set_mcp_http_client_factory,
-    shutdown_mcp_resources,
     validate_instance,
 )
 from app.agents.tools.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
@@ -305,40 +303,6 @@ def test_empty_catalog_registry_is_builtins_only() -> None:
         "multiply",
         "echo",
     }
-
-
-def test_cleanup_timeout_bounds_a_hung_close() -> None:
-    class _Slow:
-        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-            await asyncio.sleep(30)
-
-        async def aclose(self) -> None:
-            await asyncio.sleep(30)
-
-    async def _close() -> float:
-        started = time.monotonic()
-        await shutdown_mcp_resources(_Slow(), _Slow(), _Slow(), cleanup_timeout_seconds=0.05)
-        return time.monotonic() - started
-
-    elapsed = asyncio.run(_close())
-    assert elapsed < 1
-
-
-def test_cleanup_does_not_swallow_caller_cancellation() -> None:
-    async def _body() -> None:
-        try:
-            await asyncio.sleep(30)
-        finally:
-            await shutdown_mcp_resources(None, None, None, cleanup_timeout_seconds=0.05)
-
-    async def _scenario() -> None:
-        task = asyncio.create_task(_body())
-        await asyncio.sleep(0.01)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(_scenario())
 
 
 def _run_scripted(tool_name: str, secret: str) -> str:

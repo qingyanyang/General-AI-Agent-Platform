@@ -51,6 +51,8 @@ _HTTP_CLIENT_FACTORY: ContextVar[McpHttpClientFactory | None] = ContextVar(
     "mcp_http_client_factory",
     default=None,
 )
+# Strong references: the event loop keeps only weak references to tasks.
+_SESSION_TASKS: set[asyncio.Task[None]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,14 +70,6 @@ class McpToolSpec:
 
 class McpHttpClientFactory(Protocol):
     def __call__(self, server: ApprovedMcpServer, timeout_seconds: float) -> httpx.AsyncClient: ...
-
-
-class _Closable(Protocol):
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None: ...
-
-
-class _Client(Protocol):
-    async def aclose(self) -> None: ...
 
 
 class ApprovedUrlClient(httpx.AsyncClient):
@@ -346,24 +340,6 @@ async def call_remote_tool(spec: McpToolSpec, arguments: dict[str, Any]) -> str:
     return await _run_session_operation(server, settings, _call)
 
 
-async def shutdown_mcp_resources(
-    session_cm: _Closable | None,
-    transport_cm: _Closable | None,
-    client: _Client | None,
-    *,
-    cleanup_timeout_seconds: float,
-) -> None:
-    """Close session, transport, and client under a shield with its own deadline.
-
-    External cancellation resumes after this function returns.
-    """
-    with anyio.CancelScope(shield=True):
-        with anyio.move_on_after(cleanup_timeout_seconds):
-            await _close_context(session_cm)
-            await _close_context(transport_cm)
-            await _close_client(client)
-
-
 async def _discover_one(
     server: ApprovedMcpServer,
     settings: Settings,
@@ -382,24 +358,38 @@ async def _run_session_operation(
 ) -> Any:
     """Run one MCP session on a child task so its cleanup stays on that task.
 
-    ``asyncio.wait`` bounds the operation. A hung close is abandoned after
-    ``mcp_cleanup_timeout_seconds`` and does not hold the caller. Caller
-    cancellation still runs that bounded close, then propagates.
+    The child sets ``outcome`` as soon as the operation finishes, before session
+    and transport teardown. ``mcp_timeout_seconds`` bounds only the operation.
+    Teardown gets ``mcp_cleanup_timeout_seconds`` and never replaces a captured
+    outcome. A child still closing after that is cancelled and left to finish
+    in the background. Caller cancellation runs the bounded close, then propagates.
     """
     factory = _HTTP_CLIENT_FACTORY.get() or build_approved_http_client
     client = factory(server, settings.mcp_timeout_seconds)
+    outcome: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    outcome.add_done_callback(_mark_retrieved)
     task = asyncio.create_task(
-        _mcp_session_task(server, settings, operation, client),
+        _mcp_session_task(server, settings, operation, client, outcome),
         name=f"mcp-{server.name}",
     )
+    _SESSION_TASKS.add(task)
+    task.add_done_callback(_retire_session_task)
     try:
-        done, _pending = await asyncio.wait({task}, timeout=settings.mcp_timeout_seconds)
-        if task in done:
-            return task.result()
+        await asyncio.wait(
+            {outcome, task},
+            timeout=settings.mcp_timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
     finally:
-        await _await_task_shutdown(task, settings.mcp_cleanup_timeout_seconds)
+        await _await_task_shutdown(
+            task,
+            settings.mcp_cleanup_timeout_seconds,
+            cancel_first=not outcome.done(),
+        )
     if _task_is_cancelling():
         raise asyncio.CancelledError
+    if outcome.done():
+        return outcome.result()
     raise ToolConnectionError(server.name)
 
 
@@ -408,7 +398,8 @@ async def _mcp_session_task(
     settings: Settings,
     operation: Callable[[ClientSession], Awaitable[Any]],
     client: httpx.AsyncClient,
-) -> Any:
+    outcome: asyncio.Future[Any],
+) -> None:
     read_timeout = timedelta(seconds=settings.mcp_timeout_seconds)
     try:
         async with streamable_http_client(server.url, http_client=client) as (
@@ -422,25 +413,52 @@ async def _mcp_session_task(
                 read_timeout_seconds=read_timeout,
             ) as session:
                 await session.initialize()
-                return await operation(session)
-    except (ToolValidationError, ToolExecutionError, asyncio.CancelledError):
+                try:
+                    result = await operation(session)
+                except (ToolValidationError, ToolExecutionError) as exc:
+                    outcome.set_exception(exc)
+                else:
+                    outcome.set_result(result)
+    except asyncio.CancelledError:
         raise
     except Exception as exc:
+        if outcome.done():
+            logger.warning(
+                "MCP session teardown failed server=%s error_type=%s",
+                server.name,
+                type(exc).__name__,
+            )
+            return
         raise ToolConnectionError(server.name) from exc
     finally:
         await _close_client(client)
 
 
-async def _await_task_shutdown(task: asyncio.Task[Any], cleanup_timeout_seconds: float) -> None:
+async def _await_task_shutdown(
+    task: asyncio.Task[None],
+    cleanup_timeout_seconds: float,
+    *,
+    cancel_first: bool,
+) -> None:
     if task.done():
         return
-    task.cancel()
+    if cancel_first:
+        task.cancel()
     with anyio.CancelScope(shield=True):
         with anyio.move_on_after(cleanup_timeout_seconds):
-            try:
-                await task
-            except (Exception, asyncio.CancelledError):
-                return
+            await asyncio.wait({task})
+    if not task.done():
+        task.cancel()
+
+
+def _mark_retrieved(future: asyncio.Future[Any]) -> None:
+    if not future.cancelled():
+        future.exception()
+
+
+def _retire_session_task(task: asyncio.Task[None]) -> None:
+    _SESSION_TASKS.discard(task)
+    _mark_retrieved(task)
 
 
 def _approved_server_for_spec(spec: McpToolSpec, settings: Settings) -> ApprovedMcpServer:
@@ -455,18 +473,7 @@ def _task_is_cancelling() -> bool:
     return task is not None and task.cancelling() > 0
 
 
-async def _close_context(resource: _Closable | None) -> None:
-    if resource is None:
-        return
-    try:
-        await resource.__aexit__(None, None, None)
-    except Exception as exc:
-        logger.warning("MCP resource close failed error_type=%s", type(exc).__name__)
-
-
-async def _close_client(client: _Client | None) -> None:
-    if client is None:
-        return
+async def _close_client(client: httpx.AsyncClient) -> None:
     try:
         await client.aclose()
     except Exception as exc:

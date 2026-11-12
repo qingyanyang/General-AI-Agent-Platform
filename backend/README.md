@@ -372,7 +372,7 @@ Discovered tools are registered as `{server}__{remote}` and executed only throug
 
 Redirects are not followed unless the target is the approved URL or that URL with only a trailing slash added or removed. A cross-origin or different-path redirect is a connection failure.
 
-`isError=true` becomes a tool-execution `ToolMessage` (`Tool execution error for '{name}'`). Timeouts and transport failures use `Tool connection error for '{name}'`. Neither message includes the raw exception. Caller cancellation closes the session and client, then propagates; it is not turned into a tool error. Shutdown itself has `MCP_CLEANUP_TIMEOUT_SECONDS` so a hung close cannot hold the request.
+`isError=true` becomes a tool-execution `ToolMessage` (`Tool execution error for '{name}'`). Timeouts and transport failures use `Tool connection error for '{name}'`. Neither message includes the raw exception. Caller cancellation closes the session and client, then propagates; it is not turned into a tool error. Shutdown itself has `MCP_CLEANUP_TIMEOUT_SECONDS` so a hung close cannot hold the request. A result that already arrived is returned even if the session DELETE or client close hangs or fails.
 
 If an agent's saved `tool_names` includes a tool that was not in the startup catalog, execution preflight returns HTTP 503 before the model runs and before SSE response headers. The saved `tool_names` are left unchanged.
 

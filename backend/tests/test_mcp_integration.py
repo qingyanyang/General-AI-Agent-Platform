@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -36,6 +37,26 @@ class _TrackingClient(ApprovedUrlClient):
 
     async def aclose(self) -> None:
         self._closed.append(True)
+        await super().aclose()
+
+
+class _HangingCloseClient(_TrackingClient):
+    """Hangs on the session DELETE or on ``aclose`` once ``armed`` is set."""
+
+    def __init__(self, closed: list[bool], hang: str, armed: asyncio.Event, **kwargs: object):
+        super().__init__(closed, **kwargs)
+        self._hang = hang
+        self._armed = armed
+
+    async def send(self, request: httpx.Request, **kwargs: object) -> httpx.Response:
+        if self._armed.is_set() and self._hang == "delete" and request.method == "DELETE":
+            await asyncio.Event().wait()
+        return await super().send(request, **kwargs)  # type: ignore[arg-type]
+
+    async def aclose(self) -> None:
+        if self._armed.is_set() and self._hang == "aclose":
+            self._closed.append(True)
+            await asyncio.Event().wait()
         await super().aclose()
 
 
@@ -153,6 +174,53 @@ def test_hung_tool_hits_deadline_and_closes_client(monkeypatch: pytest.MonkeyPat
         assert closed
 
     asyncio.run(_scenario())
+    clear_mcp_catalog()
+
+
+@pytest.mark.parametrize("hang", ["delete", "aclose"])
+def test_completed_call_survives_hung_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+    hang: str,
+) -> None:
+    async def _scenario() -> tuple[str, float]:
+        server = _server()
+
+        @server.tool()
+        def ping(q: str) -> str:
+            """Return the text."""
+            return f"pong:{q}"
+
+        app = server.streamable_http_app()
+        settings = _settings(timeout=5)
+        closed: list[bool] = []
+        armed = asyncio.Event()
+        monkeypatch.setattr("app.agents.tools.mcp.get_settings", lambda: settings)
+
+        def factory(server_entry: ApprovedMcpServer, timeout_seconds: float) -> httpx.AsyncClient:
+            del server_entry, timeout_seconds
+            return _HangingCloseClient(
+                closed,
+                hang,
+                armed,
+                approved_url=_URL,
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+                timeout=httpx.Timeout(settings.mcp_timeout_seconds),
+                follow_redirects=False,
+            )
+
+        async with app.router.lifespan_context(app):
+            set_mcp_http_client_factory(factory)
+            await discover_approved_mcp_tools(settings)
+            spec = next(item for item in get_mcp_catalog() if item.remote_name == "ping")
+            armed.set()
+            started = time.monotonic()
+            text = await call_remote_tool(spec, {"q": "ada"})
+            return text, time.monotonic() - started
+
+    text, elapsed = asyncio.run(_scenario())
+    assert text == "pong:ada"
+    assert elapsed < 2
     clear_mcp_catalog()
 
 
