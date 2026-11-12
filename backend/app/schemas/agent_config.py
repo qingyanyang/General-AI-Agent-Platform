@@ -18,6 +18,7 @@ class AgentConfigurationIn(BaseModel):
     temperature: float | None = None
     tool_names: list[str] = Field(default_factory=list)
     skill_names: list[str] = Field(default_factory=list)
+    approval_tool_names: list[str] = Field(default_factory=list)
 
     @field_validator("system_prompt")
     @classmethod
@@ -55,6 +56,11 @@ class AgentConfigurationIn(BaseModel):
     def unique_skill_names(cls, value: list[str]) -> list[str]:
         return _unique_names(value, field_name="skill_names")
 
+    @field_validator("approval_tool_names")
+    @classmethod
+    def unique_approval_tool_names(cls, value: list[str]) -> list[str]:
+        return _unique_names(value, field_name="approval_tool_names")
+
 
 class AgentConfigurationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -65,12 +71,18 @@ class AgentConfigurationOut(BaseModel):
     temperature: float | None
     tool_names: list[str]
     skill_names: list[str]
+    approval_tool_names: list[str]
 
 
 def _unique_names(value: list[str], *, field_name: str) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
-    label = "tool name" if field_name == "tool_names" else "skill name"
+    labels = {
+        "tool_names": "tool name",
+        "skill_names": "skill name",
+        "approval_tool_names": "approval tool name",
+    }
+    label = labels[field_name]
     for raw in value:
         if not isinstance(raw, str):
             raise ValueError(f"{field_name} must be strings")

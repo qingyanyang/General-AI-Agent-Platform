@@ -54,3 +54,6 @@ class Agent(Base):
     skill_names: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, server_default=text("'[]'")
     )
+    approval_tool_names: Mapped[list[Any]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )

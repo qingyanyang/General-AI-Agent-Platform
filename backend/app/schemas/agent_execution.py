@@ -13,6 +13,7 @@ from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 
 class ExecutionStatusFilter(StrEnum):
     RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"

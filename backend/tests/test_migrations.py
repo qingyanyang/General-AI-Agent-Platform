@@ -34,7 +34,7 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
 def test_alembic_has_single_head_at_skill_names() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261112_0007", "(head)"]
+    assert result.stdout.split() == ["20261112_0008", "(head)"]
 
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
@@ -44,3 +44,11 @@ def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None
         "ALTER TABLE agent_platform.agents ADD COLUMN skill_names JSON DEFAULT '[]' NOT NULL"
         in result.stdout
     )
+
+
+def test_human_approval_migration_adds_gate_and_timing_columns() -> None:
+    result = _run("-m", "alembic", "upgrade", "20261112_0007:20261112_0008", "--sql")
+    assert result.returncode == 0, result.stderr
+    assert "approval_tool_names" in result.stdout
+    assert "active_duration_ms" in result.stdout
+    assert "session_run_gates" in result.stdout

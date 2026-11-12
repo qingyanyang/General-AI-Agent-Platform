@@ -11,7 +11,8 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphInterrupt, GraphRecursionError
+from langgraph.types import Command
 
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.graph import (
@@ -37,8 +38,10 @@ from app.agents.tool_policy import (
 from app.agents.tools import create_default_registry
 from app.agents.tracing import build_run_config, langsmith_tracing
 from app.core.config import get_settings
+from app.schemas.approval import PendingApproval
 from app.schemas.chat_message import (
     ChatMessageOut,
+    StreamApprovalRequired,
     StreamError,
     StreamEvent,
     StreamMessageDelta,
@@ -84,6 +87,7 @@ class StreamOutcome:
     execution_id: str = ""
     message: ChatMessageOut | None = None
     failed: bool = False
+    pending: PendingApproval | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,7 @@ class AgentResult:
     reply: str
     messages: list[AgentMessageView]
     execution_id: str
+    pending: PendingApproval | None = None
 
 
 def _normalize_messages(messages: list[BaseMessage]) -> list[AgentMessageView]:
@@ -104,6 +109,85 @@ def _normalize_messages(messages: list[BaseMessage]) -> list[AgentMessageView]:
         AgentMessageView(role=role, content=content)
         for role, content in normalize_message_views(messages)
     ]
+
+
+def _compile_graph(
+    *,
+    llm: BaseChatModel,
+    checkpointer: Any | None,
+    thread_id: str | None,
+    tool_auth: ToolAuthContext,
+    execution_config: AgentExecutionConfig,
+) -> tuple[Any, Any, bool]:
+    use_checkpointer = thread_id is not None
+    registry = create_default_registry()
+    graph = build_agent_graph(
+        llm=llm,
+        registry=registry,
+        checkpointer=checkpointer if use_checkpointer else None,
+        permitted_tools=permitted_tool_names(registry, tool_auth),
+        approval_tools=frozenset(execution_config.approval_tool_names),
+        system_prompt=_system_prompt_for_run(execution_config),
+    )
+    return graph, registry, use_checkpointer
+
+
+async def pending_approval_from_graph(
+    graph: Any,
+    config: dict[str, Any],
+    execution_id: str,
+) -> PendingApproval | None:
+    """Return the current checkpoint interrupt, if the tools node is paused."""
+    snapshot = await graph.aget_state(config)
+    interrupts = tuple(getattr(snapshot, "interrupts", ()) or ())
+    if not interrupts:
+        return None
+    current = interrupts[0]
+    value = current.value if isinstance(current.value, dict) else {}
+    arguments = value.get("arguments")
+    snap_config = getattr(snapshot, "config", None) or {}
+    configurable = snap_config.get("configurable") if isinstance(snap_config, dict) else {}
+    checkpoint_id = ""
+    if isinstance(configurable, dict):
+        checkpoint_id = str(configurable.get("checkpoint_id") or "")
+    return PendingApproval(
+        execution_id=execution_id,
+        interrupt_id=str(getattr(current, "id", "") or ""),
+        checkpoint_id=checkpoint_id,
+        tool_call_id=str(value.get("tool_call_id") or ""),
+        tool_name=str(value.get("tool_name") or ""),
+        arguments=dict(arguments) if isinstance(arguments, dict) else {},
+    )
+
+
+def _approval_event(pending: PendingApproval) -> StreamApprovalRequired:
+    return StreamApprovalRequired(
+        execution_id=pending.execution_id,
+        interrupt_id=pending.interrupt_id,
+        checkpoint_id=pending.checkpoint_id,
+        tool_call_id=pending.tool_call_id,
+        tool_name=pending.tool_name,
+        arguments=pending.arguments,
+    )
+
+
+async def _pending_after_cancel(
+    graph: Any,
+    config: dict[str, Any],
+    execution_id: str,
+) -> tuple[PendingApproval | None, bool]:
+    """Read a pause after cancellation. The bool is True when the read failed."""
+    holder: dict[str, PendingApproval | None] = {"pending": None}
+
+    async def _read() -> None:
+        holder["pending"] = await pending_approval_from_graph(graph, config, execution_id)
+
+    try:
+        await _await_despite_cancellation(_read())
+    except Exception:
+        logger.exception("Failed to read pending approval after cancellation")
+        return None, True
+    return holder["pending"], False
 
 
 async def run_agent(
@@ -141,29 +225,33 @@ async def run_agent(
 
     resolved_execution_id = execution_id if execution_id is not None else uuid.uuid4()
     execution_id_text = str(resolved_execution_id)
-    use_checkpointer = thread_id is not None
-    registry = create_default_registry()
-    permitted = permitted_tool_names(registry, tool_auth)
+    graph, _, use_checkpointer = _compile_graph(
+        llm=resolved_llm,
+        checkpointer=checkpointer,
+        thread_id=thread_id,
+        tool_auth=tool_auth,
+        execution_config=execution_config,
+    )
+    config = build_run_config(
+        settings,
+        resolved_execution_id,
+        thread_id=thread_id if use_checkpointer else None,
+    )
     auth_token = set_tool_auth_context(tool_auth)
+    result: dict[str, Any] | None = None
     try:
         try:
-            graph = build_agent_graph(
-                llm=resolved_llm,
-                registry=registry,
-                checkpointer=checkpointer if use_checkpointer else None,
-                permitted_tools=permitted,
-                system_prompt=_system_prompt_for_run(execution_config),
-            )
-            config = build_run_config(
-                settings,
-                resolved_execution_id,
-                thread_id=thread_id if use_checkpointer else None,
-            )
             with langsmith_tracing(settings):
-                result = await graph.ainvoke(
-                    {"messages": [HumanMessage(content=message)]},
-                    config=config,
-                )
+                try:
+                    result = await graph.ainvoke(
+                        {
+                            "messages": [HumanMessage(content=message)],
+                            "approval_batch": [],
+                        },
+                        config=config,
+                    )
+                except GraphInterrupt:
+                    result = None
         except AgentNotConfiguredError:
             raise
         except GraphRecursionError as exc:
@@ -180,12 +268,164 @@ async def run_agent(
     finally:
         reset_tool_auth_context(auth_token)
 
-    messages = list(result.get("messages", []))
+    pending = None
+    if use_checkpointer:
+        pending = await pending_approval_from_graph(graph, config, execution_id_text)
+    if pending is not None:
+        return AgentResult(
+            reply="",
+            messages=[],
+            execution_id=execution_id_text,
+            pending=pending,
+        )
+    messages = list((result or {}).get("messages", []))
     return AgentResult(
         reply=extract_assistant_reply(messages),
         messages=_normalize_messages(messages),
         execution_id=execution_id_text,
     )
+
+
+async def resume_agent(
+    decision: str,
+    *,
+    tool_auth: ToolAuthContext,
+    execution_config: AgentExecutionConfig,
+    llm: BaseChatModel | None = None,
+    checkpointer: Any | None = None,
+    thread_id: str,
+    execution_id: uuid.UUID,
+) -> AgentResult:
+    """Resume a paused session turn. ``decision`` is ``approve`` or ``reject``.
+
+    The caller rebuilds tool authorization for the current user. This does not
+    pass ``approval_batch``, so the frozen checkpoint batch stays in place.
+    """
+    if decision not in {"approve", "reject"}:
+        raise ValueError("decision must be approve or reject")
+    if checkpointer is None:
+        raise AgentNotConfiguredError("Conversation persistence is not configured")
+
+    settings = get_settings()
+    resolved_llm = llm
+    if resolved_llm is None:
+        resolved_llm = create_chat_model_for_agent(
+            provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+            temperature=execution_config.temperature,
+        )
+    execution_id_text = str(execution_id)
+    graph, _, _ = _compile_graph(
+        llm=resolved_llm,
+        checkpointer=checkpointer,
+        thread_id=thread_id,
+        tool_auth=tool_auth,
+        execution_config=execution_config,
+    )
+    config = build_run_config(settings, execution_id, thread_id=thread_id)
+    auth_token = set_tool_auth_context(tool_auth)
+    result: dict[str, Any] | None = None
+    try:
+        try:
+            with langsmith_tracing(settings):
+                try:
+                    result = await graph.ainvoke(Command(resume=decision), config=config)
+                except GraphInterrupt:
+                    result = None
+        except AgentNotConfiguredError:
+            raise
+        except GraphRecursionError as exc:
+            raise AgentExecutionError(
+                _RECURSION_MESSAGE,
+                execution_id=execution_id_text,
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — map unexpected LLM/graph failures
+            logger.exception(_EXECUTION_FAILED_MESSAGE)
+            raise AgentExecutionError(
+                _EXECUTION_FAILED_MESSAGE,
+                execution_id=execution_id_text,
+            ) from exc
+    finally:
+        reset_tool_auth_context(auth_token)
+
+    pending = await pending_approval_from_graph(graph, config, execution_id_text)
+    if pending is not None:
+        return AgentResult(
+            reply="",
+            messages=[],
+            execution_id=execution_id_text,
+            pending=pending,
+        )
+    messages = list((result or {}).get("messages", []))
+    return AgentResult(
+        reply=extract_assistant_reply(messages),
+        messages=_normalize_messages(messages),
+        execution_id=execution_id_text,
+    )
+
+
+async def read_pending_approval(
+    *,
+    checkpointer: Any,
+    thread_id: str,
+    execution_id: str,
+    execution_config: AgentExecutionConfig,
+    llm: BaseChatModel | None = None,
+) -> PendingApproval | None:
+    """Read the current interrupt without invoking the model."""
+    resolved_llm = llm
+    if resolved_llm is None:
+        resolved_llm = create_chat_model_for_agent(
+            provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+            temperature=execution_config.temperature,
+        )
+    graph, _, _ = _compile_graph(
+        llm=resolved_llm,
+        checkpointer=checkpointer,
+        thread_id=thread_id,
+        tool_auth=ToolAuthContext(
+            user_id="",
+            permissions=frozenset(),
+            agent_id=execution_config.agent_id,
+            allowed_tools=frozenset(execution_config.tool_names),
+            allowed_skills=frozenset(execution_config.skill_names),
+        ),
+        execution_config=execution_config,
+    )
+    return await pending_approval_from_graph(
+        graph,
+        {"configurable": {"thread_id": thread_id}},
+        execution_id,
+    )
+
+
+async def read_pending_despite_cancellation(
+    *,
+    checkpointer: Any,
+    thread_id: str,
+    execution_id: str,
+    execution_config: AgentExecutionConfig,
+    llm: BaseChatModel | None = None,
+) -> PendingApproval | None:
+    """Read a pause even when the caller is already cancelled."""
+    holder: dict[str, PendingApproval | None] = {"pending": None}
+
+    async def _read() -> None:
+        holder["pending"] = await read_pending_approval(
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+            execution_id=execution_id,
+            execution_config=execution_config,
+            llm=llm,
+        )
+
+    try:
+        await _await_despite_cancellation(_read())
+    except Exception:
+        logger.exception("Failed to read pending approval after cancellation")
+        return None
+    return holder["pending"]
 
 
 def _require_checkpointer_for_thread(
@@ -422,6 +662,7 @@ async def stream_agent(
     outcome.execution_id = str(resolved_execution_id)
     outcome.failed = False
     outcome.message = None
+    outcome.pending = None
     use_checkpointer = thread_id is not None
     collected: list[BaseMessage] = []
     deltas: dict[str, str] = {}
@@ -441,6 +682,7 @@ async def stream_agent(
                 registry=registry,
                 checkpointer=checkpointer if use_checkpointer else None,
                 permitted_tools=permitted,
+                approval_tools=frozenset(execution_config.approval_tool_names),
                 system_prompt=_system_prompt_for_run(execution_config),
             )
             config = build_run_config(
@@ -450,7 +692,10 @@ async def stream_agent(
             )
             with langsmith_tracing(settings):
                 graph_iter = graph.astream(
-                    {"messages": [HumanMessage(content=message)]},
+                    {
+                        "messages": [HumanMessage(content=message)],
+                        "approval_batch": [],
+                    },
                     config=config,
                     stream_mode=["messages", "updates"],
                 ).__aiter__()
@@ -466,12 +711,33 @@ async def stream_agent(
                         deltas,
                     ):
                         yield event
-            outcome.message = ChatMessageOut(
-                role="assistant",
-                content=extract_assistant_reply(collected),
-            )
+            pending = None
+            if use_checkpointer and graph is not None and config is not None:
+                pending = await pending_approval_from_graph(
+                    graph,
+                    config,
+                    outcome.execution_id,
+                )
+            if pending is not None:
+                outcome.pending = pending
+                yield _approval_event(pending)
+            else:
+                outcome.message = ChatMessageOut(
+                    role="assistant",
+                    content=extract_assistant_reply(collected),
+                )
         except asyncio.CancelledError:
-            repair_tool_calls = use_checkpointer
+            repair_tool_calls = False
+            if use_checkpointer and graph is not None and config is not None:
+                pending, failed = await _pending_after_cancel(
+                    graph,
+                    config,
+                    outcome.execution_id,
+                )
+                if pending is not None:
+                    outcome.pending = pending
+                elif not failed:
+                    repair_tool_calls = True
             raise
         except AgentNotConfiguredError as exc:
             outcome.failed = True

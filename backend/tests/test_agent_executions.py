@@ -24,7 +24,6 @@ from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
 from app.main import app
 from app.models.agent import Agent, AgentStatus
 from app.models.agent_execution import AgentExecution, AgentExecutionStatus
-from app.schemas.chat_message import ChatMessageOut
 from app.services import agent_executions as execution_service
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -779,7 +778,11 @@ def test_post_message_fake_still_accepts_execution_id_kwarg(
 
     async def fake_post(*, content: str, **kwargs):
         captured["execution_id"] = kwargs.get("execution_id")
-        return str(kwargs["execution_id"]), ChatMessageOut(role="assistant", content="ok")
+        return AgentResult(
+            reply="ok",
+            messages=[],
+            execution_id=str(kwargs["execution_id"]),
+        )
 
     monkeypatch.setattr(
         "app.api.routes.sessions.message_service.post_user_message",

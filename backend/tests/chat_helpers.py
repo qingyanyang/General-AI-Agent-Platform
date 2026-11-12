@@ -33,6 +33,7 @@ def default_execution_config(
     temperature: float | None = _DEFAULT_TEMPERATURE,
     tool_names: tuple[str, ...] | None = None,
     skill_names: tuple[str, ...] = (),
+    approval_tool_names: tuple[str, ...] = (),
 ) -> AgentExecutionConfig:
     """Immutable config snapshot for unit tests that call run_agent / stream_agent."""
     tools = tuple(sorted(BUILTIN_TOOL_NAMES)) if tool_names is None else tool_names
@@ -44,6 +45,7 @@ def default_execution_config(
         temperature=temperature,
         tool_names=tools,
         skill_names=skill_names,
+        approval_tool_names=approval_tool_names,
     )
 
 
@@ -80,6 +82,7 @@ def seed_agent(
     description: str | None = None,
     tool_names: list[str] | None = None,
     skill_names: list[str] | None = None,
+    approval_tool_names: list[str] | None = None,
     system_prompt: str | None = None,
     llm_provider: str | None = None,
     llm_model: str | None = None,
@@ -99,6 +102,8 @@ def seed_agent(
             agent.tool_names = list(tool_names)
         if skill_names is not None:
             agent.skill_names = list(skill_names)
+        if approval_tool_names is not None:
+            agent.approval_tool_names = list(approval_tool_names)
         if system_prompt is not None:
             agent.system_prompt = system_prompt
         if llm_provider is not None:
@@ -122,6 +127,8 @@ def seed_agent(
             existing.tool_names = list(tool_names)
         if skill_names is not None:
             existing.skill_names = list(skill_names)
+        if approval_tool_names is not None:
+            existing.approval_tool_names = list(approval_tool_names)
         if system_prompt is not None:
             existing.system_prompt = system_prompt
         if llm_provider is not None:
@@ -150,6 +157,7 @@ def seed_agent(
         temperature=temperature,
         tool_names=list(tool_names) if tool_names is not None else default_tools,
         skill_names=list(skill_names) if skill_names is not None else [],
+        approval_tool_names=list(approval_tool_names) if approval_tool_names is not None else [],
     )
     db.add(agent)
     db.commit()
@@ -166,9 +174,15 @@ def seed_agent_grant(
     can_configure: bool = False,
     can_execute: bool = True,
     tool_names: list[str] | None = None,
+    approval_tool_names: list[str] | None = None,
 ) -> None:
     """Opt-in grant seeding for tests that need agent access."""
-    seed_agent(db, agent_id, tool_names=tool_names)
+    seed_agent(
+        db,
+        agent_id,
+        tool_names=tool_names,
+        approval_tool_names=approval_tool_names,
+    )
     access_service.upsert_grant(
         db,
         user_id=user_id,
@@ -189,6 +203,7 @@ def create_session(
     can_configure: bool = False,
     can_execute: bool = True,
     tool_names: list[str] | None = None,
+    approval_tool_names: list[str] | None = None,
 ) -> dict:
     seed_agent_grant(
         db,
@@ -198,6 +213,7 @@ def create_session(
         can_configure=can_configure,
         can_execute=can_execute,
         tool_names=tool_names,
+        approval_tool_names=approval_tool_names,
     )
     response = api_client.post(
         "/sessions",

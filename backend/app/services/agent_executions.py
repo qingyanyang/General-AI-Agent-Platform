@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.agent_execution import AgentExecution, AgentExecutionStatus
+from app.services.session_gates import claim_idle, release_running_gate
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ def start_execution(
     user_id: str,
     agent_id: str,
     session_id: uuid.UUID | None,
+    commit: bool = True,
 ) -> float:
     """Insert a ``running`` row. Returns monotonic start for ``duration_ms``.
 
@@ -75,6 +77,8 @@ def start_execution(
         agent_id=agent_id,
         session_id=session_id,
         status=AgentExecutionStatus.RUNNING.value,
+        active_duration_ms=0,
+        running_since=started_at,
         started_at=started_at,
         completed_at=None,
         duration_ms=None,
@@ -82,8 +86,40 @@ def start_execution(
         langsmith_run_id=str(execution_id),
     )
     db.add(row)
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     return monotonic_start
+
+
+def begin_gated_execution(
+    db: Session,
+    *,
+    session_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    user_id: str,
+    agent_id: str,
+) -> float:
+    """Claim the session gate and insert the running execution, then commit both."""
+    try:
+        claim_idle(db, session_id=session_id, execution_id=execution_id)
+        monotonic_start = start_execution(
+            db,
+            execution_id=execution_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            commit=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return monotonic_start
+
+
+def _segment_ms(monotonic_start: float) -> int:
+    return max(0, int((time.perf_counter() - monotonic_start) * 1000))
 
 
 def finalize_execution(
@@ -93,20 +129,27 @@ def finalize_execution(
     status: str,
     monotonic_start: float,
     error_summary: str | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> bool:
     """Idempotent terminal update: only rows still ``running`` are changed.
 
-    Returns True when a row was updated. Late cleanup cannot overwrite a terminal status.
+    Returns True when a row was updated. Late cleanup cannot overwrite a terminal
+    status or an ``awaiting_approval`` pause. When ``session_id`` is set, the
+    matching running gate is released in the same transaction.
     """
-    if status == AgentExecutionStatus.RUNNING.value:
+    if status in {
+        AgentExecutionStatus.RUNNING.value,
+        AgentExecutionStatus.AWAITING_APPROVAL.value,
+    }:
         raise ValueError("finalize_execution requires a terminal status")
     completed_at = _utcnow()
-    duration_ms = max(0, int((time.perf_counter() - monotonic_start) * 1000))
+    segment_ms = _segment_ms(monotonic_start)
     summary = (
         sanitize_error_summary(error_summary)
         if status == AgentExecutionStatus.FAILED.value
         else None
     )
+    accrued = AgentExecution.active_duration_ms + segment_ms
     result = db.execute(
         update(AgentExecution)
         .where(
@@ -116,12 +159,17 @@ def finalize_execution(
         .values(
             status=status,
             completed_at=completed_at,
-            duration_ms=duration_ms,
+            duration_ms=accrued,
+            active_duration_ms=accrued,
+            running_since=None,
             error_summary=summary,
         )
     )
+    updated = bool(result.rowcount)
+    if updated and session_id is not None:
+        release_running_gate(db, session_id=session_id, execution_id=execution_id)
     db.commit()
-    return bool(result.rowcount)
+    return updated
 
 
 def encode_cursor(started_at: datetime, execution_id: uuid.UUID) -> str:

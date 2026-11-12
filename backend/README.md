@@ -388,6 +388,38 @@ Skills are curated instruction packages in an in-process registry (`app.agents.s
 - **Checkpoint retention:** `load_skill` returns a normal `ToolMessage`. That text remains in the session’s checkpoint history across turns. Removing a skill assignment prevents future loads and removes the catalog entry for new runs, but previously loaded instructions stay in that same session until a **new** session/thread is started.
 - **Disclosure caveat:** the configure gate on `GET /skills/{name}` does not keep instructions from executors. Once loaded, an assigned skill's instructions appear in `GET /sessions/{id}/messages` (role `tool`) and in SSE `tool.end` events, visible to anyone who can run and view that session. Do not put confidential content in skills.
 
+### Human approval (#24)
+
+`approval_tool_names` on an agent configuration is the subset of `tool_names` that must pause for a decision. Empty means the agent does not pause. Names outside `tool_names` are rejected. `awaiting_approval` is a non-terminal execution status: `completed_at` stays null until the run finishes.
+
+A session run claims `session_run_gates` in the same transaction as the `running` execution row. A second message, SSE stream, session-scoped `POST /agents/run`, or approval for that session returns **409** until the gate is idle. The gate is a database claim, not a process lock.
+
+| Request | When the run pauses | When it finishes |
+| --- | --- | --- |
+| `POST /sessions/{id}/messages` | **202** `PendingApproval` | **200** `ChatMessageCreateResult` (`execution_id`, `message.role`, `message.content`) |
+| Session-scoped `POST /agents/run` | **202** `PendingApproval` | **200** `AgentRunResponse` (`reply`, `execution_id`, `messages`) |
+| `POST /sessions/{id}/approvals/{interrupt_id}/approve` or `reject` | **202** `PendingApproval` if another gated call is next | **200** `ChatMessageCreateResult` |
+| `POST /sessions/{id}/messages/stream` | **200** `text/event-stream` after preflight, then `approval.required`, then the stream closes | **200** stream ending in `done` |
+
+SSE preflight is unchanged: **401**, **403**, **404**, **409**, and **503** are returned before the stream starts. A pause does not emit `done` or `error`. Stateless `POST /agents/run` (no `session_id`) cannot pause. A gated call becomes an error tool message and is not executed; the **200** body stays `AgentRunResponse`.
+
+`GET /sessions/{id}/approvals` returns the current checkpoint interrupt, including when a crash left the gate `running`. Approve and reject require the gate to be `awaiting_approval` and the path interrupt id, body `tool_call_id`, and stored checkpoint id to match. A mismatch or a second decision is **409**. Unknown, archived, or another user's session is **404**. An owned session whose caller lacks the agent grant is **403**.
+
+The tools node freezes tool ids, names, arguments, and `requires_approval` before any `interrupt()` or tool execution. Resume uses that frozen batch. Removing an approval requirement does not skip a decision that is already pending. Resume rebuilds tool authorization from the current caller. A tool that is no longer permitted is not executed.
+
+The checkpoint write and the gate update are separate. A crash after the interrupt is checkpointed and before the gate moves to `awaiting_approval` leaves both the execution and the gate `running`. Do not release that gate while a worker might still be executing tools. `lease_heartbeat_at` is diagnostic only. A stale heartbeat is not a reason to recover.
+
+Operator recovery is `recover_stuck_run` (not an HTTP sweeper). Stop or confirm termination of every worker that could still own the run **before** changing the gate. If the checkpoint has an interrupt, recovery moves the rows to `awaiting_approval` and does not add the unknown crash gap to `active_duration_ms`. Otherwise it fails the execution using only the duration already recorded and idles the gate.
+
+A successful graph retries its final gate update up to three times. If that still fails, the response stays successful and the gate stays blocked for an operator. Replay-safe approval is not exactly-once for external side effects: if the process dies after a tool runs and before the checkpoint write, a later resume can run that tool again. Tools with side effects need their own idempotency.
+
+Business-table concurrency tests use `TEST_DATABASE_URL`. Checkpoint tests keep using `CHECKPOINT_TEST_DATABASE_URL`. Do not point gate tests at the checkpoint database.
+
+```bash
+export TEST_DATABASE_URL='postgresql+psycopg://...'
+pytest -m business_db
+```
+
 ## Quality
 
 ```bash
@@ -395,6 +427,7 @@ ruff check app tests
 ruff format --check app tests
 pytest
 # optional: CHECKPOINT_TEST_DATABASE_URL=... pytest -m integration
+# optional: TEST_DATABASE_URL=... pytest -m business_db
 ```
 
 ## Docker
