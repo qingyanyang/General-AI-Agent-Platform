@@ -52,6 +52,12 @@ param langsmithEndpoint string = ''
 @description('PostgreSQL schema used by FastAPI / Alembic (Supabase). Must match DEFAULT_POSTGRES_SCHEMA, which migrations hardcode.')
 param postgresSchema string = 'agent_platform'
 
+@description('Auth0 tenant hostname (no scheme or path). Empty leaves protected API routes returning 503.')
+param auth0Domain string = ''
+
+@description('Auth0 API audience (identifier) for access tokens.')
+param auth0Audience string = ''
+
 @description('When false (Phase 1), skip Container App until a public GHCR image exists.')
 param deployContainerApp bool = false
 
@@ -70,7 +76,7 @@ param minReplicas int = 0
 @description('Maximum Container App replicas.')
 param maxReplicas int = 2
 
-@description('SPA / CORS origins for Blob CORS and API env.')
+@description('Extra SPA / CORS origins for Blob CORS and API env. The Static Web App URL is always added.')
 param corsAllowedOrigins array = [
   'http://localhost:5173'
 ]
@@ -94,7 +100,8 @@ var containerAppName = toLower('${prefix}-${envShort}-api')
 var staticWebAppName = toLower('${prefix}-${envShort}-swa-${uniqueToken}')
 var uamiName = toLower('${prefix}-${envShort}-uami')
 
-var corsOriginsCsv = join(corsAllowedOrigins, ',')
+var spaOrigins = union(corsAllowedOrigins, [staticWebApp.outputs.url])
+var corsOriginsCsv = join(spaOrigins, ',')
 
 module logAnalytics 'modules/log-analytics.bicep' = {
   name: 'log-analytics'
@@ -122,7 +129,7 @@ module storage 'modules/storage.bicep' = {
     location: location
     name: storageAccountName
     networkDefaultAction: 'Allow'
-    corsAllowedOrigins: corsAllowedOrigins
+    corsAllowedOrigins: spaOrigins
     tags: commonTags
   }
 }
@@ -186,6 +193,8 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     minReplicas: minReplicas
     maxReplicas: maxReplicas
     corsAllowedOrigins: corsOriginsCsv
+    auth0Domain: auth0Domain
+    auth0Audience: auth0Audience
     tags: commonTags
   }
 }

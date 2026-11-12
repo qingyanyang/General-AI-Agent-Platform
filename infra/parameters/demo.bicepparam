@@ -36,6 +36,10 @@ param enableLangsmithTracing = false
 param langsmithEndpoint = 'https://apac.api.smith.langchain.com'
 param postgresSchema = 'agent_platform'
 
+// Non-secret Auth0 API settings (protected routes return 503 without them).
+param auth0Domain = 'dev-pf7wi26tb5bj8qxz.us.auth0.com'
+param auth0Audience = 'https://api.agent-platform'
+
 // Phase 1: false — no Container App until a public GHCR image exists.
 // Phase 2: set true + containerImage = 'ghcr.io/<github-username>/agent-platform-api:<tag>'
 param deployContainerApp = true
@@ -46,6 +50,7 @@ param containerMemory = '0.5Gi'
 param minReplicas = 0
 param maxReplicas = 2
 
+// The Static Web App URL is added automatically in main.bicep.
 param corsAllowedOrigins = [
   'http://localhost:5173'
 ]

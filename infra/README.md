@@ -115,6 +115,8 @@ postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.sup
 
 Application schema: `POSTGRES_SCHEMA=agent_platform` (non-secret env on the Container App).
 
+Auth: `auth0Domain` / `auth0Audience` params set `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` (non-secret). Without them, protected API routes return 503. CORS: the Static Web App URL is always added to `CORS_ALLOWED_ORIGINS` and Blob CORS; `corsAllowedOrigins` adds extra origins such as local dev.
+
 ### Option A secret ownership
 
 Bicep declares `database-url` always (Phase 2), and optional secrets only when their `enable*` flags are true (`llm-api-key`, `langsmith-api-key`). ARM cannot reliably `empty()` a `@secure()` value, so deploy scripts set those flags when the env vars are present. Non-secret LLM config (`LLM_PROVIDER`, optional `LLM_MODEL` / `LLM_BASE_URL`) always comes from Bicep params. Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
