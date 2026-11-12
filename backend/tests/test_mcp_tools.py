@@ -302,6 +302,7 @@ def test_empty_catalog_registry_is_builtins_only() -> None:
         "add",
         "multiply",
         "echo",
+        "load_skill",
     }
 
 

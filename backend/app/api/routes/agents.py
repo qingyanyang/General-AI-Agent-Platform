@@ -161,6 +161,7 @@ def _configuration_out(agent: Agent) -> AgentConfigurationOut:
         llm_model=agent.llm_model,
         temperature=agent.temperature,
         tool_names=[str(name) for name in (agent.tool_names or [])],
+        skill_names=[str(name) for name in (agent.skill_names or [])],
     )
 
 
@@ -394,6 +395,7 @@ def put_agent_configuration(
             llm_model=body.llm_model,
             temperature=body.temperature,
             tool_names=body.tool_names,
+            skill_names=body.skill_names,
             caller_permissions=user.permissions,
         )
     except agent_service.AgentNotFoundError as exc:

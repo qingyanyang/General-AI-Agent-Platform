@@ -98,26 +98,28 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction; config defaults: empty prompt, catalog default LLM, `tool_names=[]` |
+| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction; config defaults: empty prompt, catalog default LLM, `tool_names=[]`, `skill_names=[]` |
 | `GET` | `/agents` | `agents:read` — lists agents the caller can **view** (`status=active\|inactive\|all`, default `active`) |
 | `GET` | `/agents/{agent_id}` | `agents:read` + view grant; **missing view → 404** (catalog non-disclosure; distinct from session-scoped **403**) |
 | `PATCH` | `/agents/{agent_id}` | `agents:configure` + configure grant — `name` / `description` only (`id` immutable; omit vs `null` for description) |
-| `GET` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — system prompt, LLM, temperature, tool assignments |
-| `PUT` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — full replace (row-locked); adding tools requires each tool's `required_permissions` |
+| `GET` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — system prompt, LLM, temperature, tool and skill assignments |
+| `PUT` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — full replace (row-locked); adding tools requires each tool's `required_permissions`; `load_skill` cannot be assigned in `tool_names` |
 | `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + configure grant — soft-deactivate (idempotent) |
+| `GET` | `/skills` | `agents:read` — curated skill catalog (**name + description only**) |
+| `GET` | `/skills/{name}` | `agents:configure` — full instructions + descriptive resource refs (operators may inspect all curated skills; assignment gates **runtime loading**, not operator access) |
 
 **Deactivation** blocks **all new executions** with **409** `Agent is inactive` (before the model runs): new sessions, existing-session JSON/SSE, and session-scoped or stateless `/agents/run`. Existing history remains readable under ownership + view grants.
 
 ### Agent configuration (#20)
 
-Persisted per agent: `system_prompt` (exact max **20 000** characters; whitespace preserved), `llm_provider` / `llm_model` (must be in `APPROVED_LLM_MODELS`), `temperature` (required when the approved entry supports it; must be `null` when it does not), and `tool_names` (registered tools only; **empty means no tools**, never all tools).
+Persisted per agent: `system_prompt` (exact max **20 000** characters; whitespace preserved), `llm_provider` / `llm_model` (must be in `APPROVED_LLM_MODELS`), `temperature` (required when the approved entry supports it; must be `null` when it does not), `tool_names` (registered tools only; **empty means no tools**, never all tools), and `skill_names` (curated skills only; **empty means no skills**, never all skills).
 
-- **GET/PUT** `/agents/{id}/configuration` require both the `agents:configure` permission and a configure grant (same dual authz as catalog mutate). Prompt and tool lists are not returned on `AgentOut` list/get.
+- **GET/PUT** `/agents/{id}/configuration` require both the `agents:configure` permission and a configure grant (same dual authz as catalog mutate). Prompt, tool, and skill lists are not returned on `AgentOut` list/get.
 - **Disclosure caveat:** configure-gated GET protects the stored prompt from users without configure access, but a model may still echo or paraphrase prompt content in replies visible to executors.
-- **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once, builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
-- **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history.
-- **Tool assignment:** adding a tool checks the caller's permissions against that tool's `required_permissions`; removing a tool does not. Runtime authorization uses `ToolAuthContext.allowed_tools` from the snapshot (replaces the former code allowlist map).
-- Migration `20261111_0005` backfills fixed DeepSeek literals (`deepseek` / `deepseek-flash` / `temperature=1.0`); `default` also gets built-in tools. Application `POST /agents` defaults come from settings + catalog (no silent “first catalog entry” fallback if `LLM_PROVIDER`/`LLM_MODEL` are unapproved).
+- **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once, builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools and skills, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
+- **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history. Assigned skill **names and descriptions** are appended to that ephemeral catalog; full skill instructions are not.
+- **Tool assignment:** adding a tool checks the caller's permissions against that tool's `required_permissions`; removing a tool does not. Runtime authorization uses `ToolAuthContext.allowed_tools` from the snapshot (replaces the former code allowlist map). The internal `load_skill` tool cannot be persisted in `tool_names`.
+- Migration `20261111_0005` backfills fixed DeepSeek literals (`deepseek` / `deepseek-flash` / `temperature=1.0`); `default` also gets built-in tools. Migration `20261112_0007` adds `skill_names` defaulting to `[]`. Application `POST /agents` defaults come from settings + catalog (no silent “first catalog entry” fallback if `LLM_PROVIDER`/`LLM_MODEL` are unapproved).
 
 Platform permissions remain required to use creator auto-grants (having `can_execute` on a grant does not replace `agents:execute`).
 
@@ -352,12 +354,12 @@ pytest -m integration
 
 ### Tool registry and authorization
 
-Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`. Each registration declares `required_permissions` (built-ins require `agents:execute`).
+Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins: `add`, `multiply`, `echo`, plus internal `load_skill` (#23). Each registration declares `required_permissions` (built-ins require `agents:execute`).
 
 **Authorization (#18 + #20)** is separate from agent access grants (#17):
 
 - Each agent's persisted `tool_names` is the allowlist. Empty means **no tools** (fail closed). There is no code-level `agent_id` → tools map.
-- Public runners (`run_agent` / `stream_agent`) require a trusted `ToolAuthContext` (`user_id`, `permissions`, `agent_id`, `allowed_tools`) and an `AgentExecutionConfig` snapshot from the API — never from the model.
+- Public runners (`run_agent` / `stream_agent`) require a trusted `ToolAuthContext` (`user_id`, `permissions`, `agent_id`, `allowed_tools`, `allowed_skills`) and an `AgentExecutionConfig` snapshot from the API — never from the model.
 - The model only sees the permitted intersection (`allowed_tools` ∩ registry ∩ user permissions). An empty set uses an unbound model (no `bind_tools([])`). There is no full-registry fallback.
 - `registry.aexecute(..., context=None)` is the sole execution-time authz boundary; omitted context raises `ToolAuthorizationError` (not `TypeError`). The tools node maps denials to controlled `ToolMessage`s.
 - Auth context is bound on a non-persisted `ContextVar` inside the graph consumer / stream producer (`try`/`finally`). It is not written to checkpoints or LangSmith metadata/`configurable`.
@@ -375,6 +377,15 @@ Redirects are not followed unless the target is the approved URL or that URL wit
 `isError=true` becomes a tool-execution `ToolMessage` (`Tool execution error for '{name}'`). Timeouts and transport failures use `Tool connection error for '{name}'`. Neither message includes the raw exception. Caller cancellation closes the session and client, then propagates; it is not turned into a tool error. Shutdown itself has `MCP_CLEANUP_TIMEOUT_SECONDS` so a hung close cannot hold the request. A result that already arrived is returned even if the session DELETE or client close hangs or fails.
 
 If an agent's saved `tool_names` includes a tool that was not in the startup catalog, execution preflight returns HTTP 503 before the model runs and before SSE response headers. The saved `tool_names` are left unchanged.
+
+### Agent skills (#23)
+
+Skills are curated instruction packages in an in-process registry (`app.agents.skills`). There is no skills DB table and no runtime skill CRUD.
+
+- **Operator access:** `GET /skills` (`agents:read`) returns names and descriptions only. `GET /skills/{name}` (`agents:configure`) returns instructions and descriptive resource refs. Operators may inspect all curated skills; assignment restricts **runtime loading**, not operator catalog/detail access.
+- **Assignment:** persist `skill_names` on agent configuration. Empty means no skills. Unknown names are rejected on PUT; a saved skill missing from the registry yields HTTP **503** at execution preflight.
+- **Runtime:** assigned skills appear in the ephemeral system catalog as name + description only. Full instructions load only when the model calls `load_skill`. `execution_bundle` adds `load_skill` to the run-only tool allowlist when `skill_names` is non-empty; empty skills means no loader. `load_skill` always re-checks `allowed_skills` and never grants additional tool permissions. Resource ids are descriptive references only — the platform does not fetch or open them.
+- **Checkpoint retention:** `load_skill` returns a normal `ToolMessage`. That text remains in the session’s checkpoint history across turns. Removing a skill assignment prevents future loads and removes the catalog entry for new runs, but previously loaded instructions stay in that same session until a **new** session/thread is started.
 
 ## Quality
 

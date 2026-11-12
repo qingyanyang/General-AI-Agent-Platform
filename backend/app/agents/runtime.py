@@ -24,6 +24,10 @@ from app.agents.messages import (
     message_content_text,
     normalize_message_views,
 )
+from app.agents.skills import (
+    compose_system_prompt_with_skills,
+    create_default_skill_registry,
+)
 from app.agents.tool_policy import (
     ToolAuthContext,
     permitted_tool_names,
@@ -48,6 +52,17 @@ logger = logging.getLogger(__name__)
 _RECURSION_MESSAGE = "Agent stopped: recursion limit exceeded (possible tool-calling loop)"
 _EXECUTION_FAILED_MESSAGE = "Agent execution failed"
 _CANCELLED_TOOL_CONTENT = "Tool execution cancelled"
+
+
+def _system_prompt_for_run(execution_config: AgentExecutionConfig) -> str:
+    """Ephemeral prompt: base system prompt plus assigned skill name/description catalog."""
+    skill_registry = create_default_skill_registry()
+    skills = [
+        skill_registry.get(name)
+        for name in execution_config.skill_names
+        if skill_registry.has(name)
+    ]
+    return compose_system_prompt_with_skills(execution_config.system_prompt, skills)
 
 
 def ensure_llm_configured() -> None:
@@ -137,7 +152,7 @@ async def run_agent(
                 registry=registry,
                 checkpointer=checkpointer if use_checkpointer else None,
                 permitted_tools=permitted,
-                system_prompt=execution_config.system_prompt,
+                system_prompt=_system_prompt_for_run(execution_config),
             )
             config = build_run_config(
                 settings,
@@ -426,7 +441,7 @@ async def stream_agent(
                 registry=registry,
                 checkpointer=checkpointer if use_checkpointer else None,
                 permitted_tools=permitted,
-                system_prompt=execution_config.system_prompt,
+                system_prompt=_system_prompt_for_run(execution_config),
             )
             config = build_run_config(
                 settings,

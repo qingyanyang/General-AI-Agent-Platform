@@ -10,16 +10,18 @@ from app.agents.tools.errors import (
     ToolRegistryError,
     ToolValidationError,
 )
+from app.agents.tools.load_skill import load_skill
 from app.agents.tools.mcp import mcp_tools_from_catalog
 from app.agents.tools.registry import ToolMetadata, ToolRegistry
 
 
 def create_default_registry() -> ToolRegistry:
-    """Build a registry of built-ins plus the startup MCP catalog."""
+    """Build a registry of built-ins, load_skill, and the startup MCP catalog."""
     registry = ToolRegistry()
     registry.register(add, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
     registry.register(multiply, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
     registry.register(echo, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
+    registry.register(load_skill, required_permissions=BUILTIN_REQUIRED_PERMISSIONS)
     for tool in mcp_tools_from_catalog():
         if registry.has(tool.name):
             continue
@@ -39,5 +41,6 @@ __all__ = [
     "add",
     "create_default_registry",
     "echo",
+    "load_skill",
     "multiply",
 ]

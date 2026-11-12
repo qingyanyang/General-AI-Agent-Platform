@@ -17,6 +17,7 @@ class AgentConfigurationIn(BaseModel):
     llm_model: str = Field(min_length=1, max_length=128)
     temperature: float | None = None
     tool_names: list[str] = Field(default_factory=list)
+    skill_names: list[str] = Field(default_factory=list)
 
     @field_validator("system_prompt")
     @classmethod
@@ -47,19 +48,12 @@ class AgentConfigurationIn(BaseModel):
     @field_validator("tool_names")
     @classmethod
     def unique_tool_names(cls, value: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for raw in value:
-            if not isinstance(raw, str):
-                raise ValueError("tool_names must be strings")
-            name = raw.strip()
-            if not name:
-                raise ValueError("tool_names must not contain blank entries")
-            if name in seen:
-                raise ValueError(f"duplicate tool name: {name}")
-            seen.add(name)
-            cleaned.append(name)
-        return cleaned
+        return _unique_names(value, field_name="tool_names")
+
+    @field_validator("skill_names")
+    @classmethod
+    def unique_skill_names(cls, value: list[str]) -> list[str]:
+        return _unique_names(value, field_name="skill_names")
 
 
 class AgentConfigurationOut(BaseModel):
@@ -70,3 +64,21 @@ class AgentConfigurationOut(BaseModel):
     llm_model: str
     temperature: float | None
     tool_names: list[str]
+    skill_names: list[str]
+
+
+def _unique_names(value: list[str], *, field_name: str) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    label = "tool name" if field_name == "tool_names" else "skill name"
+    for raw in value:
+        if not isinstance(raw, str):
+            raise ValueError(f"{field_name} must be strings")
+        name = raw.strip()
+        if not name:
+            raise ValueError(f"{field_name} must not contain blank entries")
+        if name in seen:
+            raise ValueError(f"duplicate {label}: {name}")
+        seen.add(name)
+        cleaned.append(name)
+    return cleaned
