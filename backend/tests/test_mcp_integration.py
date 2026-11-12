@@ -18,8 +18,8 @@ from app.agents.tools.mcp import (
     get_mcp_catalog,
     set_mcp_http_client_factory,
 )
-from app.agents.tools.mcp_allowlist import ApprovedMcpServer
 from app.core.config import Settings
+from app.core.mcp_allowlist import ApprovedMcpServer
 from langchain_core.messages import AIMessage
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings

@@ -37,12 +37,12 @@ from app.agents.tools.errors import (
     ToolExecutionError,
     ToolValidationError,
 )
-from app.agents.tools.mcp_allowlist import (
+from app.core.config import Settings, get_settings
+from app.core.mcp_allowlist import (
     ApprovedMcpServer,
     registry_name_for,
     url_is_approved_target,
 )
-from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 

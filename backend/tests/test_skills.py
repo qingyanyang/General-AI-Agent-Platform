@@ -397,6 +397,62 @@ def test_missing_saved_skill_returns_503_before_sse(
     assert row.skill_names == ["missing_skill"]
 
 
+def test_http_unassign_retains_session_text_blocks_reload_and_new_session_is_clean(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scripts = iter(
+        [
+            _load_skill_script(call_id="call_load"),
+            _load_skill_script(call_id="call_reload"),
+            [AIMessage(content="fresh reply")],
+        ]
+    )
+    monkeypatch.setattr(
+        "app.agents.runtime.create_chat_model_for_agent",
+        lambda **_kwargs: ScriptedChatModel(script=next(scripts)),
+    )
+    first_session = create_session(api_client, db_session, can_configure=True, tool_names=[])
+    with_saver(api_client)
+
+    def put_skills(skill_names: list[str]) -> None:
+        response = api_client.put(
+            "/agents/default/configuration",
+            json=_valid_config_body(tool_names=[], skill_names=skill_names),
+            headers=headers(),
+        )
+        assert response.status_code == 200, response.text
+
+    def send(session_id: str, content: str) -> None:
+        response = api_client.post(
+            f"/sessions/{session_id}/messages",
+            json={"content": content},
+            headers=headers(),
+        )
+        assert response.status_code == 200, response.text
+
+    def tool_contents(session_id: str) -> list[str]:
+        response = api_client.get(f"/sessions/{session_id}/messages", headers=headers())
+        assert response.status_code == 200, response.text
+        return [item["content"] for item in response.json()["items"] if item["role"] == "tool"]
+
+    put_skills(["summarize_brief"])
+    send(first_session["id"], "load it")
+    loaded = tool_contents(first_session["id"])
+    assert any("executive summary" in content.lower() for content in loaded)
+
+    put_skills([])
+    send(first_session["id"], "load it again")
+    after_unassign = tool_contents(first_session["id"])
+    assert any("executive summary" in content.lower() for content in after_unassign)
+    assert after_unassign[-1] == f"Error: tool '{LOAD_SKILL_TOOL_NAME}' is not authorized"
+
+    second_session = create_session(api_client, db_session, can_configure=True, tool_names=[])
+    send(second_session["id"], "hello")
+    assert tool_contents(second_session["id"]) == []
+
+
 def test_unassign_retains_checkpoint_text_but_blocks_reload_and_new_session_is_clean() -> None:
     skill = create_default_skill_registry().get("summarize_brief")
     saver = InMemorySaver()

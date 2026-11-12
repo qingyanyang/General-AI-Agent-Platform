@@ -386,6 +386,7 @@ Skills are curated instruction packages in an in-process registry (`app.agents.s
 - **Assignment:** persist `skill_names` on agent configuration. Empty means no skills. Unknown names are rejected on PUT; a saved skill missing from the registry yields HTTP **503** at execution preflight.
 - **Runtime:** assigned skills appear in the ephemeral system catalog as name + description only. Full instructions load only when the model calls `load_skill`. `execution_bundle` adds `load_skill` to the run-only tool allowlist when `skill_names` is non-empty; empty skills means no loader. `load_skill` always re-checks `allowed_skills` and never grants additional tool permissions. Resource ids are descriptive references only — the platform does not fetch or open them.
 - **Checkpoint retention:** `load_skill` returns a normal `ToolMessage`. That text remains in the session’s checkpoint history across turns. Removing a skill assignment prevents future loads and removes the catalog entry for new runs, but previously loaded instructions stay in that same session until a **new** session/thread is started.
+- **Disclosure caveat:** the configure gate on `GET /skills/{name}` does not keep instructions from executors. Once loaded, an assigned skill's instructions appear in `GET /sessions/{id}/messages` (role `tool`) and in SSE `tool.end` events, visible to anyone who can run and view that session. Do not put confidential content in skills.
 
 ## Quality
 
