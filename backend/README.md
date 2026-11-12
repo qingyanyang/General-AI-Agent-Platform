@@ -344,6 +344,9 @@ pytest -m integration
 | `CHECKPOINTS_SCHEMA` | `langgraph` | Schema for LangGraph checkpoint tables |
 | `AUTH0_DOMAIN` | unset | Auth0 tenant hostname (required for protected routes) |
 | `AUTH0_AUDIENCE` | unset | Auth0 API audience (required for protected routes) |
+| `APPROVED_MCP_SERVERS` | `[]` | JSON array of `{name, url}` Streamable HTTP MCP servers. Empty registers no MCP tools. Names match `^[a-z][a-z0-9_]{0,31}$` and must not contain `__`. URLs are `http` or `https` with no userinfo. Authenticated MCP servers are not supported in this version |
+| `MCP_TIMEOUT_SECONDS` | `10` | Deadline for one discovery or one tool call, including connect and initialize |
+| `MCP_CLEANUP_TIMEOUT_SECONDS` | `2` | Separate deadline for closing the MCP session and HTTP client after the operation |
 
 `POST /agents/run` returns `execution_id`. That id is the LangSmith root run id. Metadata on the trace is only `execution_id`, `agent_id`, and `environment`.
 
@@ -360,6 +363,18 @@ Approved tools live in a central `ToolRegistry` (`app.agents.tools`). Built-ins:
 - Auth context is bound on a non-persisted `ContextVar` inside the graph consumer / stream producer (`try`/`finally`). It is not written to checkpoints or LangSmith metadata/`configurable`.
 
 The same policy applies to JSON session messages, SSE streams, and `POST /agents/run`.
+
+### MCP tools
+
+Startup discovers tools from `APPROVED_MCP_SERVERS` with the MCP Python SDK 1.30 Streamable HTTP client (`streamable_http_client`). Legacy HTTP+SSE (`sse_client`) is not used. Streamable HTTP responses may still be `text/event-stream`.
+
+Discovered tools are registered as `{server}__{remote}` and executed only through `registry.aexecute`. The original remote name is what the client sends to `call_tool`. A tool whose name is unsafe for the configured OpenAI-compatible providers, contains `__`, collides with another registry entry, or publishes an external `$ref` is skipped. Discovery follows `list_tools` pagination. One server failing discovery does not drop tools from the other servers and does not stop the process. The catalog stays fixed until restart.
+
+Redirects are not followed unless the target is the approved URL or that URL with only a trailing slash added or removed. A cross-origin or different-path redirect is a connection failure.
+
+`isError=true` becomes a tool-execution `ToolMessage` (`Tool execution error for '{name}'`). Timeouts and transport failures use `Tool connection error for '{name}'`. Neither message includes the raw exception. Caller cancellation closes the session and client, then propagates; it is not turned into a tool error. Shutdown itself has `MCP_CLEANUP_TIMEOUT_SECONDS` so a hung close cannot hold the request. A result that already arrived is returned even if the session DELETE or client close hangs or fails.
+
+If an agent's saved `tool_names` includes a tool that was not in the startup catalog, execution preflight returns HTTP 503 before the model runs and before SSE response headers. The saved `tool_names` are left unchanged.
 
 ## Quality
 

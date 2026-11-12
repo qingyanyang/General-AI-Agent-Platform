@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.agents.tools.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
+
 # Process-default convenience: DeepSeek + unset/OpenAI default model → flash.
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
@@ -127,10 +129,29 @@ class Settings(BaseSettings):
     auth0_domain: str | None = None
     auth0_audience: str | None = None
     log_level: str = "INFO"
+    # JSON array of {name, url}. Empty means no MCP tools. No credentials in this version.
+    approved_mcp_servers: str | list[Any] = ""
+    # One deadline for connect, initialize, list_tools pagination, and call_tool.
+    mcp_timeout_seconds: float = 10.0
+    # Bound on shielded session/transport close after the operation deadline.
+    mcp_cleanup_timeout_seconds: float = 2.0
 
     @field_validator("approved_llm_models", mode="before")
     @classmethod
     def _keep_approved_raw(cls, value: Any) -> Any:
+        return value
+
+    @field_validator("approved_mcp_servers", mode="before")
+    @classmethod
+    def _validate_mcp_servers(cls, value: Any) -> Any:
+        parse_approved_mcp_servers(value)
+        return value
+
+    @field_validator("mcp_timeout_seconds", "mcp_cleanup_timeout_seconds")
+    @classmethod
+    def _positive_mcp_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("MCP timeout must be greater than 0")
         return value
 
     @property
@@ -153,6 +174,9 @@ class Settings(BaseSettings):
         if normalized == "deepseek":
             return self.deepseek_api_key
         return None
+
+    def approved_mcp_server_list(self) -> tuple[ApprovedMcpServer, ...]:
+        return parse_approved_mcp_servers(self.approved_mcp_servers)
 
     def approved_llm_catalog(self) -> tuple[ApprovedLlmModel, ...]:
         return _parse_approved_catalog(self.approved_llm_models)

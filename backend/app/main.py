@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.checkpointer import checkpointer_lifespan
+from app.agents.tools.mcp import discover_approved_mcp_tools
 from app.api.router import api_router
 from app.core.auth import AUTH_HTTP_TIMEOUT
 from app.core.config import get_settings
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
         async with checkpointer_lifespan(settings) as (pool, checkpointer):
             app.state.checkpoint_pool = pool
             app.state.checkpointer = checkpointer
+            await discover_approved_mcp_tools(settings)
             yield
         app.state.jwks_cache = None
         app.state.jwks_cache_lock = None
