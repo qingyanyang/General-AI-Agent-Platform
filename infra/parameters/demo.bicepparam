@@ -34,7 +34,7 @@ param llmBaseUrl = ''
 param langsmithApiKey = readEnvironmentVariable('LANGSMITH_API_KEY', '')
 param enableLangsmithTracing = false
 param langsmithEndpoint = 'https://apac.api.smith.langchain.com'
-param postgresSchema = 'public'
+param postgresSchema = 'agent_platform'
 
 // Phase 1: false — no Container App until a public GHCR image exists.
 // Phase 2: set true + containerImage = 'ghcr.io/<github-username>/agent-platform-api:<tag>'

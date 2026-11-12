@@ -19,6 +19,19 @@ def test_settings_load_cors_origins(monkeypatch: MonkeyPatch) -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("postgresql://u:p@host:5432/db", "postgresql+psycopg://u:p@host:5432/db"),
+        ("postgres://u:p@host/db", "postgresql+psycopg://u:p@host/db"),
+        (" postgresql+psycopg://u:p@host/db ", "postgresql+psycopg://u:p@host/db"),
+        ("sqlite+pysqlite:///:memory:", "sqlite+pysqlite:///:memory:"),
+    ],
+)
+def test_database_url_uses_installed_psycopg_driver(raw: str, expected: str) -> None:
+    assert Settings(_env_file=None, database_url=raw).database_url == expected
+
+
 def test_langsmith_settings_default_off() -> None:
     settings = Settings(_env_file=None)
 

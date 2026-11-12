@@ -162,7 +162,7 @@ az deployment group create \
 
 - Image format: `ghcr.io/<github-username>/agent-platform-api:<tag>`
 - Container App has **no** `registries` credentials — package visibility must be **Public**.
-- `backend-cd` builds/pushes with `packages: write` + `GITHUB_TOKEN`, then `az containerapp update --image`.
+- `backend-cd` builds/pushes with `packages: write` + `GITHUB_TOKEN`, runs `alembic upgrade head` with the `demo` `DATABASE_URL` secret, then `az containerapp update --image`.
 
 One-time: after the first push, set the package to Public in GitHub → Packages.
 
@@ -202,7 +202,7 @@ Bicep no longer manages these resources; leaving them undeleted only incurs cost
 | --- | --- |
 | `infra-ci.yml` | Bicep build/lint; optional what-if |
 | `infra-cd.yml` | Manual deploy; `DATABASE_URL` (+ optional `LLM_API_KEY`, `LANGSMITH_API_KEY`) |
-| `backend-cd.yml` | GHCR build/push; Container App image update; `/health` |
+| `backend-cd.yml` | GHCR build/push; `alembic upgrade head`; Container App image update; `/health` |
 | `frontend-cd.yml` | SWA deploy |
 
 **Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (optional), `LANGSMITH_API_KEY` (optional), `AZURE_STATIC_WEB_APPS_API_TOKEN`
