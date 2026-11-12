@@ -49,8 +49,8 @@ param enableLangsmithTracing bool = false
 @description('Optional LangSmith API base URL. Empty → SDK default. Project name is app-derived: agent-platform-{ENVIRONMENT}.')
 param langsmithEndpoint string = ''
 
-@description('PostgreSQL schema used by FastAPI / Alembic (Supabase).')
-param postgresSchema string = 'public'
+@description('PostgreSQL schema used by FastAPI / Alembic (Supabase). Must match DEFAULT_POSTGRES_SCHEMA, which migrations hardcode.')
+param postgresSchema string = 'agent_platform'
 
 @description('When false (Phase 1), skip Container App until a public GHCR image exists.')
 param deployContainerApp bool = false

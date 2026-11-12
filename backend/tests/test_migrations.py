@@ -37,10 +37,10 @@ def test_alembic_has_single_head_at_skill_names() -> None:
     assert result.stdout.split() == ["20261112_0007", "(head)"]
 
 
-def test_skill_names_migration_renders_add_backfill_and_not_null() -> None:
+def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
     result = _run("-m", "alembic", "upgrade", "20261111_0006:20261112_0007", "--sql")
     assert result.returncode == 0, result.stderr
-    sql = result.stdout
-    assert "ALTER TABLE agent_platform.agents ADD COLUMN skill_names JSON" in sql
-    assert "SET skill_names = '[]' WHERE skill_names IS NULL" in sql
-    assert "ALTER COLUMN skill_names SET NOT NULL" in sql
+    assert (
+        "ALTER TABLE agent_platform.agents ADD COLUMN skill_names JSON DEFAULT '[]' NOT NULL"
+        in result.stdout
+    )

@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     # Bound on shielded session/transport close after the operation deadline.
     mcp_cleanup_timeout_seconds: float = 2.0
 
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, value: str | None) -> str | None:
+        # Only psycopg 3 is installed; bare postgresql:// would make SQLAlchemy load psycopg2.
+        if value is None:
+            return None
+        url = value.strip()
+        for scheme in ("postgresql://", "postgres://"):
+            if url.startswith(scheme):
+                return "postgresql+psycopg://" + url.removeprefix(scheme)
+        return url
+
     @field_validator("approved_llm_models", mode="before")
     @classmethod
     def _keep_approved_raw(cls, value: Any) -> Any:

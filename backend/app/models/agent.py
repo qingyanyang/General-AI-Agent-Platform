@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import DateTime, Float, Index, String, Text, func
+from sqlalchemy import DateTime, Float, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -51,4 +51,6 @@ class Agent(Base):
     llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     tool_names: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
-    skill_names: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
+    skill_names: Mapped[list[Any]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )

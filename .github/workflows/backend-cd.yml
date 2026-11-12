@@ -114,6 +114,33 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Set up Python
+        if: steps.deployment.outputs.enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Run database migrations
+        if: steps.deployment.outputs.enabled == 'true'
+        working-directory: backend
+        env:
+          # Runners are IPv4-only: use the Supabase session pooler URL, not db.<ref>.supabase.co.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POSTGRES_SCHEMA: agent_platform
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ERROR: Set DATABASE_URL in GitHub Environment 'demo'."
+            exit 1
+          fi
+
+          pip install -r requirements.txt
+          alembic upgrade head
+          alembic current
+
       - name: Update Container App image
         if: steps.deployment.outputs.enabled == 'true'
         run: |

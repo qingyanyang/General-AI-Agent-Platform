@@ -29,8 +29,8 @@ param environmentName string
 @description('Supabase PostgreSQL connection URL (prefer session pooler for IPv4). IaC-owned ACA secret.')
 param databaseUrl string
 
-@description('PostgreSQL schema used by the application (search_path / Alembic).')
-param postgresSchema string = 'public'
+@description('PostgreSQL schema for ORM tables. Must match DEFAULT_POSTGRES_SCHEMA, which migrations hardcode.')
+param postgresSchema string = 'agent_platform'
 
 @secure()
 @description('External LLM API key. Only used when enableLlmApiKey is true.')
