@@ -284,8 +284,11 @@ async def create_message(
         agent_id=agent_id,
         session_id=owned_session_id,
     )
-    terminal_status: str | None = None
-    error_summary: str | None = None
+    # Default to failed so an unexpected exception still leaves a terminal row.
+    terminal_status = FAILED
+    error_summary: str | None = execution_service.sanitize_error_summary(
+        "Agent execution failed",
+    )
     try:
         execution_id, message = await message_service.post_user_message(
             content=body.content,
@@ -296,8 +299,10 @@ async def create_message(
             execution_id=execution_uuid,
         )
         terminal_status = SUCCEEDED
+        error_summary = None
     except asyncio.CancelledError:
         terminal_status = CANCELLED
+        error_summary = None
         raise
     except AgentNotConfiguredError as exc:
         terminal_status = FAILED
@@ -317,14 +322,13 @@ async def create_message(
             detail=detail,
         ) from exc
     finally:
-        if terminal_status is not None:
-            finalize_execution_best_effort(
-                request,
-                execution_id=execution_uuid,
-                status=terminal_status,
-                monotonic_start=monotonic_start,
-                error_summary=error_summary,
-            )
+        finalize_execution_best_effort(
+            request,
+            execution_id=execution_uuid,
+            status=terminal_status,
+            monotonic_start=monotonic_start,
+            error_summary=error_summary,
+        )
 
     _touch_session_activity(request, owned_session_id)
     # Execute-only responses already return only the current-turn assistant message.
@@ -410,6 +414,17 @@ async def stream_message(
                     queue.put_nowait(event)
             except asyncio.CancelledError:
                 raise
+            except Exception:  # noqa: BLE001 — map setup failures before stream_agent's try
+                logger.exception("Agent stream producer failed")
+                outcome.failed = True
+                if not outcome.execution_id:
+                    outcome.execution_id = str(execution_uuid)
+                queue.put_nowait(
+                    StreamError(
+                        execution_id=outcome.execution_id,
+                        message="Agent execution failed",
+                    ),
+                )
             finally:
                 queue.put_nowait(None)
 
@@ -443,13 +458,16 @@ async def stream_message(
         finally:
             # Derive terminal status from outcome so cancel during delivery cannot
             # overwrite a successful graph completion with cancelled.
+            producer_failed = (
+                producer.done() and not producer.cancelled() and producer.exception() is not None
+            )
             if outcome.message is not None and not outcome.failed:
                 terminal_status = SUCCEEDED
                 terminal_error = None
-            elif outcome.failed:
+            elif outcome.failed or producer_failed:
                 terminal_status = FAILED
                 terminal_error = execution_service.sanitize_error_summary(
-                    stream_error_summary,
+                    stream_error_summary or "Agent execution failed",
                 )
             else:
                 terminal_status = CANCELLED

@@ -288,8 +288,11 @@ async def agents_run(
         agent_id=agent_id,
         session_id=session_id,
     )
-    terminal_status: str | None = None
-    error_summary: str | None = None
+    # Default to failed so an unexpected exception still leaves a terminal row.
+    terminal_status = FAILED
+    error_summary: str | None = execution_service.sanitize_error_summary(
+        "Agent execution failed",
+    )
     try:
         result = await run_agent(
             body.message,
@@ -300,8 +303,10 @@ async def agents_run(
             execution_id=execution_id,
         )
         terminal_status = SUCCEEDED
+        error_summary = None
     except asyncio.CancelledError:
         terminal_status = CANCELLED
+        error_summary = None
         raise
     except AgentNotConfiguredError as exc:
         terminal_status = FAILED
@@ -321,14 +326,13 @@ async def agents_run(
             detail=detail,
         ) from exc
     finally:
-        if terminal_status is not None:
-            finalize_execution_best_effort(
-                request,
-                execution_id=execution_id,
-                status=terminal_status,
-                monotonic_start=monotonic_start,
-                error_summary=error_summary,
-            )
+        finalize_execution_best_effort(
+            request,
+            execution_id=execution_id,
+            status=terminal_status,
+            monotonic_start=monotonic_start,
+            error_summary=error_summary,
+        )
 
     if include_history:
         messages = [

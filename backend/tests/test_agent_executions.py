@@ -253,6 +253,52 @@ def test_forced_failure_persists_sanitized_summary(
     assert "secret" not in (row.error_summary or "")
 
 
+def test_unhandled_json_exception_finalizes_failed(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    seed_agent_grant(db_session, USER)
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("secret provider dump before mapped try")
+
+    monkeypatch.setattr("app.api.routes.agents.run_agent", _boom)
+    with pytest.raises(RuntimeError, match="secret provider dump"):
+        api_client.post(
+            "/agents/run",
+            json={"message": "hi"},
+            headers=headers(),
+        )
+    row = db_session.scalars(select(AgentExecution)).one()
+    assert row.status == AgentExecutionStatus.FAILED.value
+    assert row.error_summary == "Agent execution failed"
+    assert "secret" not in (row.error_summary or "")
+
+
+def test_unhandled_message_exception_finalizes_failed(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    created = create_session(api_client, db_session)
+    with_saver(api_client)
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("secret during post")
+
+    monkeypatch.setattr("app.api.routes.sessions.message_service.post_user_message", _boom)
+    with pytest.raises(RuntimeError, match="secret during post"):
+        api_client.post(
+            f"/sessions/{created['id']}/messages",
+            json={"content": "hi"},
+            headers=headers(),
+        )
+    row = db_session.scalars(select(AgentExecution)).one()
+    assert row.status == AgentExecutionStatus.FAILED.value
+    assert row.error_summary == "Agent execution failed"
+
+
 def test_rejected_auth_creates_no_row(api_client: TestClient, db_session: Session) -> None:
     response = api_client.post("/agents/run", json={"message": "hi"})
     assert response.status_code == 422
@@ -463,6 +509,68 @@ def test_stream_failure_persists_failed(
         assert response.status_code == 200
         body = response.read().decode()
     assert "event: error" in body
+    row = db_session.scalars(select(AgentExecution)).one()
+    assert row.status == AgentExecutionStatus.FAILED.value
+    assert row.error_summary == "Agent execution failed"
+
+
+def test_stream_producer_exception_finalizes_failed_not_cancelled(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    created = create_session(api_client, db_session)
+    with_saver(api_client)
+
+    async def _boom(**_kwargs):
+        raise RuntimeError("secret model init")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(
+        "app.api.routes.sessions.message_service.stream_user_message",
+        _boom,
+    )
+    with api_client.stream(
+        "POST",
+        f"/sessions/{created['id']}/messages/stream",
+        json={"content": "hi"},
+        headers=headers(),
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode()
+    assert "event: error" in body
+    assert "secret" not in body
+    row = db_session.scalars(select(AgentExecution)).one()
+    assert row.status == AgentExecutionStatus.FAILED.value
+    assert row.error_summary == "Agent execution failed"
+
+
+def test_stream_failed_without_error_frame_still_stores_summary(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    created = create_session(api_client, db_session)
+    with_saver(api_client)
+
+    async def _fail_without_event(*, outcome, execution_id, **_kwargs):  # noqa: ANN001
+        outcome.failed = True
+        outcome.execution_id = str(execution_id)
+        if False:
+            yield None
+
+    monkeypatch.setattr(
+        "app.api.routes.sessions.message_service.stream_user_message",
+        _fail_without_event,
+    )
+    with api_client.stream(
+        "POST",
+        f"/sessions/{created['id']}/messages/stream",
+        json={"content": "hi"},
+        headers=headers(),
+    ) as response:
+        assert response.status_code == 200
+        response.read()
     row = db_session.scalars(select(AgentExecution)).one()
     assert row.status == AgentExecutionStatus.FAILED.value
     assert row.error_summary == "Agent execution failed"
