@@ -100,10 +100,14 @@ export interface ManagementClient {
   listAgents(cursor?: string): Promise<AgentPage>
   getAgent(id: string): Promise<AgentRecord>
   createAgent(body: { id: string; name: string; description: string | null }): Promise<AgentRecord>
-  updateAgent(id: string, patch: AgentPatch): Promise<AgentRecord>
-  deactivateAgent(id: string): Promise<AgentRecord>
+  updateAgent(id: string, patch: AgentPatch, signal?: AbortSignal): Promise<AgentRecord>
+  deactivateAgent(id: string, signal?: AbortSignal): Promise<AgentRecord>
   getConfiguration(id: string): Promise<AgentConfiguration>
-  putConfiguration(id: string, body: AgentConfiguration): Promise<AgentConfiguration>
+  putConfiguration(
+    id: string,
+    body: AgentConfiguration,
+    signal?: AbortSignal,
+  ): Promise<AgentConfiguration>
   listTools(): Promise<ToolCatalogItem[]>
   listModels(): Promise<LlmModel[]>
   listSkills(): Promise<SkillSummary[]>
@@ -307,6 +311,9 @@ export function createManagementClient(
 ): ManagementClient {
   async function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
     const token = await getAccessToken()
+    if (init.signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
     const headers = new Headers(init.headers)
     headers.set('Authorization', `Bearer ${token}`)
     if (init.body !== undefined && !headers.has('Content-Type')) {
@@ -339,16 +346,18 @@ export function createManagementClient(
       })
       return parseAgent(await readJson(response))
     },
-    async updateAgent(id, patch) {
+    async updateAgent(id, patch, signal) {
       const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
+        signal,
       })
       return parseAgent(await readJson(response))
     },
-    async deactivateAgent(id) {
+    async deactivateAgent(id, signal) {
       const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}/deactivate`, {
         method: 'POST',
+        signal,
       })
       return parseAgent(await readJson(response))
     },
@@ -356,10 +365,11 @@ export function createManagementClient(
       const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}/configuration`)
       return parseConfiguration(await readJson(response))
     },
-    async putConfiguration(id, body) {
+    async putConfiguration(id, body, signal) {
       const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}/configuration`, {
         method: 'PUT',
         body: JSON.stringify(body),
+        signal,
       })
       return parseConfiguration(await readJson(response))
     },

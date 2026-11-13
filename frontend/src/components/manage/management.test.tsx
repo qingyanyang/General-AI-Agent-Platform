@@ -323,7 +323,13 @@ describe('ManagementPage', () => {
     await user.clear(screen.getByRole('textbox', { name: 'Name' }))
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Renamed')
     await user.click(screen.getByRole('button', { name: 'Save details' }))
-    await waitFor(() => expect(updateAgent).toHaveBeenCalledWith('alpha', { name: 'Renamed' }))
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenCalledWith(
+        'alpha',
+        { name: 'Renamed' },
+        expect.any(AbortSignal),
+      ),
+    )
     expect(prompt).toHaveValue('edited prompt')
     await user.clear(screen.getByRole('textbox', { name: 'Name' }))
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Renamed again')
@@ -457,6 +463,62 @@ describe('ManagementPage', () => {
     expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
     expect(putConfiguration).not.toHaveBeenCalled()
     expect(updateAgent).not.toHaveBeenCalled()
+  })
+
+  it('aborts an in-flight configuration save when another agent opens', async () => {
+    const user = userEvent.setup()
+    const alpha = agent('alpha', 'Alpha')
+    const beta = agent('beta', 'Beta')
+    let alphaSignal: AbortSignal | undefined
+    const putConfiguration = vi.fn(
+      (id: string, body: AgentConfiguration, signal?: AbortSignal) =>
+        new Promise<AgentConfiguration>((resolve) => {
+          if (id !== 'alpha') {
+            resolve(body)
+            return
+          }
+          alphaSignal = signal
+          signal?.addEventListener(
+            'abort',
+            () => {
+              resolve({ ...body, system_prompt: 'late save' })
+            },
+            { once: true },
+          )
+        }),
+    )
+    renderPage(
+      createClient({
+        listAgents: async () => ({ items: [alpha, beta], next_cursor: null }),
+        getAgent: async (id) => (id === 'beta' ? beta : alpha),
+        getConfiguration: async (id) =>
+          configuration({ system_prompt: id === 'beta' ? 'prompt b' : 'prompt a' }),
+        putConfiguration,
+      }),
+      developer,
+    )
+    await openListedAgent(user, 'Alpha')
+    const prompt = screen.getByLabelText('System prompt')
+    await user.clear(prompt)
+    await user.click(prompt)
+    await user.paste('discard me')
+    await user.click(screen.getByRole('button', { name: 'Save configuration' }))
+    await waitFor(() => expect(putConfiguration).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Save configuration' })).toBeDisabled()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: /Beta/ }))
+    expect(await screen.findByLabelText('System prompt')).toHaveValue('prompt b')
+    expect(alphaSignal?.aborted).toBe(true)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save configuration' })).toBeEnabled(),
+    )
+    expect(screen.queryByDisplayValue('late save')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('discard me')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save configuration' }))
+    await waitFor(() => expect(putConfiguration).toHaveBeenCalledTimes(2))
+    expect(putConfiguration.mock.calls[1]?.[0]).toBe('beta')
+    expect(putConfiguration.mock.calls[1]?.[2]).toEqual(expect.any(AbortSignal))
+    expect((putConfiguration.mock.calls[1]?.[2] as AbortSignal).aborted).toBe(false)
   })
 
   it('keeps load more on the query that produced the cursor', async () => {

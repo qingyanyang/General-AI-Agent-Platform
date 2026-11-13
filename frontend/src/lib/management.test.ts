@@ -46,4 +46,58 @@ describe('createManagementClient', () => {
     const [, init] = fetchMock.mock.calls[0]
     expect(init?.method).toBe('PUT')
   })
+
+  it('does not send a configuration save after it is aborted', async () => {
+    const controller = new AbortController()
+    const client = createManagementClient(async () => {
+      controller.abort()
+      return 'token'
+    })
+    await expect(
+      client.putConfiguration(
+        'alpha',
+        {
+          system_prompt: 'Hello',
+          llm_provider: 'deepseek',
+          llm_model: 'deepseek-flash',
+          temperature: 1,
+          tool_names: [],
+          skill_names: [],
+          approval_tool_names: [],
+        },
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('passes the save abort signal through to fetch', async () => {
+    const controller = new AbortController()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        system_prompt: 'Hello',
+        llm_provider: 'deepseek',
+        llm_model: 'deepseek-flash',
+        temperature: 1,
+        tool_names: [],
+        skill_names: [],
+        approval_tool_names: [],
+      }),
+    )
+    const client = createManagementClient(async () => 'token')
+    await client.putConfiguration(
+      'alpha',
+      {
+        system_prompt: 'Hello',
+        llm_provider: 'deepseek',
+        llm_model: 'deepseek-flash',
+        temperature: 1,
+        tool_names: [],
+        skill_names: [],
+        approval_tool_names: [],
+      },
+      controller.signal,
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: controller.signal })
+  })
 })

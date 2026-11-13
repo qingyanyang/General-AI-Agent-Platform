@@ -109,6 +109,10 @@ function errorMessage(error: unknown, fallback: string): string {
   return isApiError(error) ? error.message : fallback
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 async function settle<T>(promise: Promise<T>): Promise<{ value: T | null; error: unknown }> {
   try {
     return { value: await promise, error: null }
@@ -191,6 +195,14 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
   const executionGeneration = useRef(0)
   const metadataSaveTicket = useRef(0)
   const configSaveTicket = useRef(0)
+  const saveAbort = useRef<AbortController | null>(null)
+
+  const beginSave = useCallback((): AbortSignal => {
+    saveAbort.current?.abort()
+    const controller = new AbortController()
+    saveAbort.current = controller
+    return controller.signal
+  }, [])
   const agentsRef = useRef(agents)
   agentsRef.current = agents
   const detailRef = useRef(detail)
@@ -348,6 +360,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       const ticket = openGeneration.current + 1
       openGeneration.current = ticket
       openAgentId.current = trimmed
+      saveAbort.current?.abort()
       setDetail(null)
       setSavingMetadata(false)
       setSavingConfig(false)
@@ -498,11 +511,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     }
     const saveTicket = metadataSaveTicket.current + 1
     metadataSaveTicket.current = saveTicket
+    const signal = beginSave()
     setSavingMetadata(true)
     setActionError(null)
     try {
-      const updated = await client.updateAgent(id, patch)
-      if (!isCurrentOpen(id, ticket)) {
+      const updated = await client.updateAgent(id, patch, signal)
+      if (signal.aborted || !isCurrentOpen(id, ticket)) {
         return
       }
       const form = metadataFromAgent(updated)
@@ -514,7 +528,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       })
       setAgents((previous) => previous.map((agent) => (agent.id === updated.id ? updated : agent)))
     } catch (error) {
-      if (!isCurrentOpen(id, ticket) || reportUnauthorized(error)) {
+      if (
+        signal.aborted ||
+        isAbortError(error) ||
+        !isCurrentOpen(id, ticket) ||
+        reportUnauthorized(error)
+      ) {
         return
       }
       setActionError(errorMessage(error, 'Could not save agent details.'))
@@ -523,7 +542,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         setSavingMetadata(false)
       }
     }
-  }, [canConfigure, client, isCurrentOpen, reportUnauthorized])
+  }, [beginSave, canConfigure, client, isCurrentOpen, reportUnauthorized])
 
   const saveConfiguration = useCallback(async () => {
     const current = detailRef.current
@@ -544,11 +563,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     }
     const saveTicket = configSaveTicket.current + 1
     configSaveTicket.current = saveTicket
+    const signal = beginSave()
     setSavingConfig(true)
     setConfigError(null)
     try {
-      const saved = await client.putConfiguration(id, body)
-      if (!isCurrentOpen(id, ticket)) {
+      const saved = await client.putConfiguration(id, body, signal)
+      if (signal.aborted || !isCurrentOpen(id, ticket)) {
         return
       }
       const form = configFromApi(saved)
@@ -559,7 +579,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         return { ...previous, configForm: form, savedConfig: form }
       })
     } catch (error) {
-      if (!isCurrentOpen(id, ticket) || reportUnauthorized(error)) {
+      if (
+        signal.aborted ||
+        isAbortError(error) ||
+        !isCurrentOpen(id, ticket) ||
+        reportUnauthorized(error)
+      ) {
         return
       }
       setConfigError(errorMessage(error, 'Could not save configuration.'))
@@ -568,7 +593,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         setSavingConfig(false)
       }
     }
-  }, [canConfigure, client, isCurrentOpen, reportUnauthorized])
+  }, [beginSave, canConfigure, client, isCurrentOpen, reportUnauthorized])
 
   const createAgent = useCallback(async () => {
     const id = createId.trim()
@@ -616,10 +641,11 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     if (!isCurrentOpen(id, ticket)) {
       return
     }
+    const signal = beginSave()
     setActionError(null)
     try {
-      const updated = await client.deactivateAgent(id)
-      if (!isCurrentOpen(id, ticket)) {
+      const updated = await client.deactivateAgent(id, signal)
+      if (signal.aborted || !isCurrentOpen(id, ticket)) {
         return
       }
       setAgents((previous) => previous.map((agent) => (agent.id === updated.id ? updated : agent)))
@@ -630,12 +656,17 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         return { ...previous, metadata: updated }
       })
     } catch (error) {
-      if (!isCurrentOpen(id, ticket) || reportUnauthorized(error)) {
+      if (
+        signal.aborted ||
+        isAbortError(error) ||
+        !isCurrentOpen(id, ticket) ||
+        reportUnauthorized(error)
+      ) {
         return
       }
       setActionError(errorMessage(error, 'Could not deactivate this agent.'))
     }
-  }, [canConfigure, client, isCurrentOpen, reportUnauthorized])
+  }, [beginSave, canConfigure, client, isCurrentOpen, reportUnauthorized])
 
   const loadGrants = useCallback(
     async (agentId: string) => {
