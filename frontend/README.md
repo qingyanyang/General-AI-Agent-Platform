@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-Set `VITE_API_BASE_URL` to the FastAPI origin (local or Container App URL). Demo builds read these GitHub repository variables: `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE`. The Auth0 values are the public SPA settings.
+Set `VITE_API_BASE_URL` to the FastAPI origin (local or Container App URL). Demo builds read these GitHub repository variables: `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE`. The Auth0 values are the public SPA settings. Optional `VITE_LANGSMITH_PROJECT_URL` is an absolute `http://` or `https://` project URL. The management page shows each execution's `langsmith_run_id` as a copyable correlation id and, when that variable is a valid http(s) URL, a link to the project. It does not build a per-trace URL, and any other scheme is ignored.
 
 ## Sign-in
 

@@ -1,11 +1,15 @@
 import { useAuth0 } from '@auth0/auth0-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Route, Routes } from 'react-router-dom'
 
 import { Workspace } from '@/components/chat/workspace'
+import { ManagementPage } from '@/components/manage/management-page'
 import { Button } from '@/components/ui/button'
 import { createChatClient, apiBaseUrl, apiUrl } from '@/lib/api'
 import { readAuthConfig } from '@/lib/auth-config'
 import { ApiError } from '@/lib/errors'
+import { createManagementClient } from '@/lib/management'
+import { canOpenManagement, permissionsFromToken } from '@/lib/permissions'
 
 type HealthState =
   | { status: 'idle' }
@@ -104,26 +108,50 @@ function AuthenticatedApp() {
   const { isLoading, isAuthenticated, logout, getAccessTokenSilently, user } = useAuth0()
   const audience = auth?.audience ?? ''
 
-  const client = useMemo(
-    () =>
-      createChatClient(async () => {
-        try {
-          const token = await getAccessTokenSilently({
-            authorizationParams: { audience },
-          })
-          if (!token) {
-            throw new ApiError(401, 'Sign in again.')
-          }
-          return token
-        } catch (error) {
-          if (error instanceof ApiError) {
-            throw error
-          }
-          throw new ApiError(401, 'Sign in again.')
-        }
-      }),
-    [audience, getAccessTokenSilently],
+  const getAccessToken = useCallback(async () => {
+    try {
+      const token = await getAccessTokenSilently({
+        authorizationParams: { audience },
+      })
+      if (!token) {
+        throw new ApiError(401, 'Sign in again.')
+      }
+      return token
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error
+      }
+      throw new ApiError(401, 'Sign in again.')
+    }
+  }, [audience, getAccessTokenSilently])
+
+  const client = useMemo(() => createChatClient(getAccessToken), [getAccessToken])
+  const managementClient = useMemo(
+    () => createManagementClient(getAccessToken),
+    [getAccessToken],
   )
+  const [permissions, setPermissions] = useState<ReadonlySet<string>>(new Set())
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return
+    }
+    let cancelled = false
+    void getAccessToken()
+      .then((token) => {
+        if (!cancelled) {
+          setPermissions(permissionsFromToken(token))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPermissions(new Set())
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [getAccessToken, isAuthenticated])
 
   if (isLoading) {
     return (
@@ -137,17 +165,42 @@ function AuthenticatedApp() {
     return <SignInScreen />
   }
 
+  const accountLabel = user?.name ?? user?.email ?? null
+  const onUnauthorized = () => {
+    void logout({ logoutParams: { returnTo: window.location.origin } })
+  }
+  const onSignOut = () => {
+    void logout({ logoutParams: { returnTo: window.location.origin } })
+  }
+
   return (
-    <Workspace
-      client={client}
-      accountLabel={user?.name ?? user?.email ?? null}
-      onUnauthorized={() => {
-        void logout({ logoutParams: { returnTo: window.location.origin } })
-      }}
-      onSignOut={() => {
-        void logout({ logoutParams: { returnTo: window.location.origin } })
-      }}
-    />
+    <Routes>
+      <Route
+        path="/manage"
+        element={
+          <ManagementPage
+            client={managementClient}
+            permissions={permissions}
+            accountLabel={accountLabel}
+            projectUrl={import.meta.env.VITE_LANGSMITH_PROJECT_URL}
+            onUnauthorized={onUnauthorized}
+            onSignOut={onSignOut}
+          />
+        }
+      />
+      <Route
+        path="*"
+        element={
+          <Workspace
+            client={client}
+            accountLabel={accountLabel}
+            showManage={canOpenManagement(permissions)}
+            onUnauthorized={onUnauthorized}
+            onSignOut={onSignOut}
+          />
+        }
+      />
+    </Routes>
   )
 }
 
