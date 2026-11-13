@@ -181,10 +181,16 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
   const [createName, setCreateName] = useState('')
   const [createDescription, setCreateDescription] = useState('')
   const [creating, setCreating] = useState(false)
+  const [grantQueryId, setGrantQueryId] = useState<string | null>(null)
+  const [executionQuery, setExecutionQuery] = useState<{ agentId: string; status: string } | null>(
+    null,
+  )
   const openGeneration = useRef(0)
   const openAgentId = useRef<string | null>(null)
   const grantGeneration = useRef(0)
   const executionGeneration = useRef(0)
+  const metadataSaveTicket = useRef(0)
+  const configSaveTicket = useRef(0)
   const agentsRef = useRef(agents)
   agentsRef.current = agents
   const detailRef = useRef(detail)
@@ -342,6 +348,9 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       const ticket = openGeneration.current + 1
       openGeneration.current = ticket
       openAgentId.current = trimmed
+      setDetail(null)
+      setSavingMetadata(false)
+      setSavingConfig(false)
       setAgentLoading(true)
       setAgentError(null)
       setConfigError(null)
@@ -356,6 +365,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         if (!isCurrentOpen(trimmed, ticket) || reportUnauthorized(error)) {
           return
         }
+        setDetail(null)
         setAgentError(errorMessage(error, 'Could not load this agent.'))
       } finally {
         if (isCurrentOpen(trimmed, ticket)) {
@@ -483,6 +493,11 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     }
     const id = current.id
     const ticket = openGeneration.current
+    if (!isCurrentOpen(id, ticket)) {
+      return
+    }
+    const saveTicket = metadataSaveTicket.current + 1
+    metadataSaveTicket.current = saveTicket
     setSavingMetadata(true)
     setActionError(null)
     try {
@@ -504,7 +519,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       }
       setActionError(errorMessage(error, 'Could not save agent details.'))
     } finally {
-      if (isCurrentOpen(id, ticket)) {
+      if (metadataSaveTicket.current === saveTicket) {
         setSavingMetadata(false)
       }
     }
@@ -524,6 +539,11 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     }
     const id = current.id
     const ticket = openGeneration.current
+    if (!isCurrentOpen(id, ticket)) {
+      return
+    }
+    const saveTicket = configSaveTicket.current + 1
+    configSaveTicket.current = saveTicket
     setSavingConfig(true)
     setConfigError(null)
     try {
@@ -544,7 +564,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       }
       setConfigError(errorMessage(error, 'Could not save configuration.'))
     } finally {
-      if (isCurrentOpen(id, ticket)) {
+      if (configSaveTicket.current === saveTicket) {
         setSavingConfig(false)
       }
     }
@@ -593,6 +613,9 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     }
     const id = current.id
     const ticket = openGeneration.current
+    if (!isCurrentOpen(id, ticket)) {
+      return
+    }
     setActionError(null)
     try {
       const updated = await client.deactivateAgent(id)
@@ -615,7 +638,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
   }, [canConfigure, client, isCurrentOpen, reportUnauthorized])
 
   const loadGrants = useCallback(
-    async (agentId: string, cursor?: string) => {
+    async (agentId: string) => {
       const trimmed = agentId.trim()
       if (!trimmed || !canManageAccess) {
         return
@@ -625,11 +648,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
       setGrantLoading(true)
       setGrantError(null)
       try {
-        const page = await client.listGrants(trimmed, cursor)
+        const page = await client.listGrants(trimmed, undefined)
         if (grantGeneration.current !== ticket) {
           return
         }
-        setGrants((current) => (cursor ? [...current, ...page.items] : page.items))
+        setGrantQueryId(trimmed)
+        setGrants(page.items)
         setGrantCursor(page.next_cursor)
       } catch (error) {
         if (grantGeneration.current !== ticket || reportUnauthorized(error)) {
@@ -644,6 +668,34 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     },
     [canManageAccess, client, reportUnauthorized],
   )
+
+  const loadMoreGrants = useCallback(async () => {
+    if (!canManageAccess || !grantQueryId || !grantCursor) {
+      return
+    }
+    const queryId = grantQueryId
+    const ticket = grantGeneration.current + 1
+    grantGeneration.current = ticket
+    setGrantLoading(true)
+    setGrantError(null)
+    try {
+      const page = await client.listGrants(queryId, grantCursor)
+      if (grantGeneration.current !== ticket) {
+        return
+      }
+      setGrants((current) => [...current, ...page.items])
+      setGrantCursor(page.next_cursor)
+    } catch (error) {
+      if (grantGeneration.current !== ticket || reportUnauthorized(error)) {
+        return
+      }
+      setGrantError(errorMessage(error, 'Could not load grants.'))
+    } finally {
+      if (grantGeneration.current === ticket) {
+        setGrantLoading(false)
+      }
+    }
+  }, [canManageAccess, client, grantCursor, grantQueryId, reportUnauthorized])
 
   const saveGrant = useCallback(async () => {
     const agentId = grantAgentId.trim()
@@ -699,41 +751,77 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     [client, reportUnauthorized],
   )
 
-  const loadExecutions = useCallback(
-    async (cursor?: string) => {
-      if (!canRead) {
+  const loadExecutions = useCallback(async () => {
+    if (!canRead) {
+      return
+    }
+    const query = { agentId: executionAgentId.trim(), status: executionStatus }
+    const ticket = executionGeneration.current + 1
+    executionGeneration.current = ticket
+    setExecutionLoading(true)
+    setExecutionError(null)
+    try {
+      const page = await client.listExecutions({
+        agentId: query.agentId || undefined,
+        status: query.status || undefined,
+        cursor: undefined,
+      })
+      if (executionGeneration.current !== ticket) {
         return
       }
-      const ticket = executionGeneration.current + 1
-      executionGeneration.current = ticket
-      setExecutionLoading(true)
-      setExecutionError(null)
-      try {
-        const page = await client.listExecutions({
-          agentId: executionAgentId.trim() || undefined,
-          status: executionStatus || undefined,
-          cursor,
-        })
-        if (executionGeneration.current !== ticket) {
-          return
-        }
-        setExecutions((current) => (cursor ? [...current, ...page.items] : page.items))
-        setExecutionCursor(page.next_cursor)
-      } catch (error) {
-        if (executionGeneration.current !== ticket || reportUnauthorized(error)) {
-          return
-        }
-        setExecutionError(errorMessage(error, 'Could not load executions.'))
-      } finally {
-        if (executionGeneration.current === ticket) {
-          setExecutionLoading(false)
-        }
+      setExecutionQuery(query)
+      setExecutions(page.items)
+      setExecutionCursor(page.next_cursor)
+    } catch (error) {
+      if (executionGeneration.current !== ticket || reportUnauthorized(error)) {
+        return
       }
-    },
-    [canRead, client, executionAgentId, executionStatus, reportUnauthorized],
-  )
+      setExecutionError(errorMessage(error, 'Could not load executions.'))
+    } finally {
+      if (executionGeneration.current === ticket) {
+        setExecutionLoading(false)
+      }
+    }
+  }, [canRead, client, executionAgentId, executionStatus, reportUnauthorized])
+
+  const loadMoreExecutions = useCallback(async () => {
+    if (!canRead || !executionQuery || !executionCursor) {
+      return
+    }
+    const query = executionQuery
+    const ticket = executionGeneration.current + 1
+    executionGeneration.current = ticket
+    setExecutionLoading(true)
+    setExecutionError(null)
+    try {
+      const page = await client.listExecutions({
+        agentId: query.agentId || undefined,
+        status: query.status || undefined,
+        cursor: executionCursor,
+      })
+      if (executionGeneration.current !== ticket) {
+        return
+      }
+      setExecutions((current) => [...current, ...page.items])
+      setExecutionCursor(page.next_cursor)
+    } catch (error) {
+      if (executionGeneration.current !== ticket || reportUnauthorized(error)) {
+        return
+      }
+      setExecutionError(errorMessage(error, 'Could not load executions.'))
+    } finally {
+      if (executionGeneration.current === ticket) {
+        setExecutionLoading(false)
+      }
+    }
+  }, [canRead, client, executionCursor, executionQuery, reportUnauthorized])
 
   const unsaved = metadataDirty(detail) || configDirty(detail)
+  const grantQueryMatches = grantQueryId !== null && grantAgentId.trim() === grantQueryId
+  const executionQueryMatches =
+    executionQuery !== null &&
+    executionQuery.agentId === executionAgentId.trim() &&
+    executionQuery.status === executionStatus
 
   return {
     canRead,
@@ -774,6 +862,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     setGrantAgentId,
     grants,
     grantCursor,
+    grantQueryMatches,
     grantLoading,
     grantError,
     grantUserId,
@@ -785,6 +874,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     grantExecute,
     setGrantExecute,
     loadGrants,
+    loadMoreGrants,
     saveGrant,
     revokeGrant,
     executionAgentId,
@@ -793,8 +883,10 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     setExecutionStatus,
     executions,
     executionCursor,
+    executionQueryMatches,
     executionLoading,
     executionError,
     loadExecutions,
+    loadMoreExecutions,
   }
 }

@@ -422,4 +422,106 @@ describe('ManagementPage', () => {
       'https://smith.example/o/acme/projects/p/agent',
     )
   })
+
+  it('drops the previous form when the next agent fails to load', async () => {
+    const user = userEvent.setup()
+    const alpha = agent('alpha', 'Alpha')
+    const beta = agent('beta', 'Beta')
+    const putConfiguration = vi.fn()
+    const updateAgent = vi.fn()
+    renderPage(
+      createClient({
+        listAgents: async () => ({ items: [alpha, beta], next_cursor: null }),
+        getAgent: async (id) => (id === 'beta' ? beta : alpha),
+        getConfiguration: async (id) => {
+          if (id === 'beta') {
+            throw new Error('network down')
+          }
+          return configuration({ system_prompt: 'prompt a' })
+        },
+        putConfiguration,
+        updateAgent,
+      }),
+      developer,
+    )
+    await openListedAgent(user, 'Alpha')
+    const prompt = screen.getByLabelText('System prompt')
+    await user.clear(prompt)
+    await user.click(prompt)
+    await user.paste('discard me')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: /Beta/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load this agent.')
+    expect(screen.queryByLabelText('System prompt')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save configuration' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+    expect(putConfiguration).not.toHaveBeenCalled()
+    expect(updateAgent).not.toHaveBeenCalled()
+  })
+
+  it('keeps load more on the query that produced the cursor', async () => {
+    const user = userEvent.setup()
+    const listExecutions = vi
+      .fn<ManagementClient['listExecutions']>()
+      .mockResolvedValueOnce({
+        items: [execution('running')],
+        next_cursor: 'cursor-1',
+      })
+      .mockResolvedValueOnce({
+        items: [{ ...execution('running'), id: 'exec-running-2' }],
+        next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        items: [execution('awaiting_approval')],
+        next_cursor: null,
+      })
+    const listGrants = vi.fn<ManagementClient['listGrants']>().mockResolvedValue({
+      items: [
+        {
+          id: 'grant-1',
+          user_id: 'auth0|other',
+          agent_id: 'alpha',
+          can_view: true,
+          can_configure: false,
+          can_execute: false,
+        },
+      ],
+      next_cursor: 'grant-cursor',
+    })
+    renderPage(
+      createClient({ listExecutions, listGrants }),
+      new Set([AGENTS_READ, AGENT_ACCESS_MANAGE]),
+    )
+    await user.type(screen.getByRole('textbox', { name: 'Execution agent id' }), 'alpha')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Execution status' }), 'running')
+    await user.click(screen.getByRole('button', { name: 'Load executions' }))
+    await user.click(await screen.findByRole('button', { name: 'Load more executions' }))
+    expect(listExecutions).toHaveBeenLastCalledWith({
+      agentId: 'alpha',
+      status: 'running',
+      cursor: 'cursor-1',
+    })
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Execution status' }),
+      'awaiting_approval',
+    )
+    expect(screen.queryByRole('button', { name: 'Load more executions' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Load executions' }))
+    await waitFor(() =>
+      expect(listExecutions).toHaveBeenLastCalledWith({
+        agentId: 'alpha',
+        status: 'awaiting_approval',
+        cursor: undefined,
+      }),
+    )
+
+    await user.type(screen.getByRole('textbox', { name: 'Grant agent id' }), 'alpha')
+    await user.click(screen.getByRole('button', { name: 'Load grants' }))
+    expect(await screen.findByRole('button', { name: 'Load more grants' })).toBeInTheDocument()
+    await user.clear(screen.getByRole('textbox', { name: 'Grant agent id' }))
+    await user.type(screen.getByRole('textbox', { name: 'Grant agent id' }), 'beta')
+    expect(screen.queryByRole('button', { name: 'Load more grants' })).not.toBeInTheDocument()
+    expect(listGrants).toHaveBeenCalledTimes(1)
+    expect(listGrants).toHaveBeenCalledWith('alpha', undefined)
+  })
 })

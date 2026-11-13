@@ -541,13 +541,8 @@ export function ManagementPage({
               </li>
             ))}
           </ul>
-          {page.grantCursor ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void page.loadGrants(page.grantAgentId, page.grantCursor ?? undefined)}
-            >
+          {page.grantCursor && page.grantQueryMatches ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => void page.loadMoreGrants()}>
               Load more grants
             </Button>
           ) : null}
@@ -592,12 +587,12 @@ export function ManagementPage({
               <ExecutionRow key={execution.id} execution={execution} projectUrl={projectHref} />
             ))}
           </div>
-          {page.executionCursor ? (
+          {page.executionCursor && page.executionQueryMatches ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => void page.loadExecutions(page.executionCursor ?? undefined)}
+              onClick={() => void page.loadMoreExecutions()}
             >
               Load more executions
             </Button>
