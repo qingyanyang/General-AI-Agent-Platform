@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { Workspace } from '@/components/chat/workspace'
@@ -249,6 +249,73 @@ describe('chat workspace', () => {
     expect(calls).toBe(1)
     expect(await screen.findByText('Stopped.')).toBeInTheDocument()
     expect(screen.getByText('please-stop')).toBeInTheDocument()
+  })
+
+  it('ignores a late done event after Stop', async () => {
+    const user = userEvent.setup()
+    let emit: (event: StreamEvent) => void = () => undefined
+    const client = textSessionClient({
+      streamMessage: (_sessionId, _content, abortSignal, onEvent) => {
+        emit = onEvent
+        return new Promise<StreamTerminal>((resolve) => {
+          abortSignal.addEventListener('abort', () => resolve({ kind: 'aborted' }))
+        })
+      },
+    })
+    renderWorkspace(client)
+    await openSupportSession(user, 'Notes')
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'please-stop')
+    const sending = user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByRole('button', { name: 'Stop' })
+    await user.click(screen.getByRole('button', { name: 'Stop' }))
+    emit({
+      type: 'done',
+      execution_id: 'exec-1',
+      message: { role: 'assistant', content: 'LATE-DONE' },
+    })
+    expect(screen.queryByText('LATE-DONE')).not.toBeInTheDocument()
+    expect(screen.getByText('Stopped.')).toBeInTheDocument()
+    await sending
+  })
+
+  it('keeps a newer session load when an older 409 refresh finishes later', async () => {
+    const user = userEvent.setup()
+    let calls = 0
+    let releaseStale: (messages: ChatMessage[]) => void = () => undefined
+    const refreshStarted = deferred<void>()
+    const listMessages = vi.fn(async (): Promise<ChatMessage[]> => {
+      calls += 1
+      if (calls === 1) {
+        return [{ role: 'user', content: 'Please send the file' }]
+      }
+      if (calls === 2) {
+        return new Promise((resolve) => {
+          releaseStale = resolve
+          refreshStarted.resolve()
+        })
+      }
+      return [{ role: 'assistant', content: 'Reloaded history' }]
+    })
+    renderWorkspace(
+      sessionClient({
+        listMessages,
+        decideApproval: async () => {
+          throw new ApiError(409, 'Approval does not match the pending call')
+        },
+      }),
+    )
+    await openSupportSession(user)
+    const approving = user.click(await screen.findByRole('button', { name: 'Approve' }))
+    await refreshStarted.promise
+    await user.click(screen.getByRole('button', { name: 'Quarterly review' }))
+    expect(await screen.findByText('Reloaded history')).toBeInTheDocument()
+    await act(async () => {
+      releaseStale([{ role: 'assistant', content: 'Stale conflict history' }])
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('Stale conflict history')).not.toBeInTheDocument()
+    expect(screen.getByText('Reloaded history')).toBeInTheDocument()
+    await approving
   })
 
   it('drops late stream events after switching sessions', async () => {

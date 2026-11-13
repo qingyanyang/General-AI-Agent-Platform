@@ -333,11 +333,16 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
 
   const refreshOpenSession = useCallback(
     async (sessionId: string) => {
+      const generation = openGeneration.current
       const [messages, approvals] = await Promise.all([
         client.listMessages(sessionId),
         client.listApprovals(sessionId),
       ])
-      if (!activeRef.current || selectedSessionRef.current?.id !== sessionId) {
+      if (
+        !activeRef.current ||
+        selectedSessionRef.current?.id !== sessionId ||
+        openGeneration.current !== generation
+      ) {
         return
       }
       setEntries(historyToEntries(messages))
@@ -380,7 +385,10 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
           trimmed,
           controller.signal,
           (event) => {
-            if (!isStreamCurrent(generation, session.id)) {
+            if (
+              !isStreamCurrent(generation, session.id) ||
+              stoppedGeneration.current === generation
+            ) {
               return
             }
             received = true

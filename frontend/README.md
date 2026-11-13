@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-Set `VITE_API_BASE_URL` to the FastAPI origin (local or Container App URL). GitHub Actions uses repository variable `VITE_API_BASE_URL` for demo builds.
+Set `VITE_API_BASE_URL` to the FastAPI origin (local or Container App URL). Demo builds read these GitHub repository variables: `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE`. The Auth0 values are the public SPA settings.
 
 ## Sign-in
 
@@ -50,4 +50,4 @@ If any Auth0 setting is missing, the app shows a configuration screen and does n
 
 - Path alias: `@/*` → `src/*`
 - SWA SPA fallback: `public/staticwebapp.config.json` (copied into `dist/`)
-- Keep secrets out of the browser; only public API URLs belong in `VITE_*`
+- Keep secrets out of the browser. `VITE_*` values are public: the API origin and the Auth0 SPA settings.
