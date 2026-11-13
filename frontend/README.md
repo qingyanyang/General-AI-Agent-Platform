@@ -18,6 +18,7 @@ Requires Node.js 20+.
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Local Vite dev server (`http://localhost:5173`) |
+| `npm test` | Vitest |
 | `npm run lint` | ESLint (flat config) |
 | `npm run typecheck` | `tsc -b` |
 | `npm run build` | Typecheck + production build → `dist/` |
@@ -33,6 +34,17 @@ npm run dev
 ```
 
 Set `VITE_API_BASE_URL` to the FastAPI origin (local or Container App URL). GitHub Actions uses repository variable `VITE_API_BASE_URL` for demo builds.
+
+## Sign-in
+
+The chat workspace uses the existing Auth0 **EAP Web** SPA (Authorization Code + PKCE). Copy the three `VITE_AUTH0_*` values from `.env.example` into `.env`. `VITE_AUTH0_DOMAIN` is the tenant hostname only. `VITE_AUTH0_AUDIENCE` is `https://api.agent-platform`. The browser requests an access token for that audience; there is no client secret in the frontend.
+
+In the Auth0 application, allow these callback, logout, and web-origin URLs:
+
+- `http://localhost:5173`
+- the deployed Static Web App origin (`staticWebAppUrl` from the infra deployment)
+
+If any Auth0 setting is missing, the app shows a configuration screen and does not call protected routes. `/health` stays public. A 401 returns the user to sign-in. An agent listed by `GET /agents` can be viewed without being executable; a 403 leaves the open transcript in place.
 
 ## Notes
 
