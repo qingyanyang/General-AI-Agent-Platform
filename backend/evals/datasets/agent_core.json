@@ -1,0 +1,125 @@
+{
+  "examples": [
+    {
+      "id": "add-two-numbers",
+      "split": "deterministic",
+      "inputs": {
+        "message": "What is 2 + 3?",
+        "allowed_tools": ["add", "multiply", "echo"],
+        "permissions": ["agents:execute"],
+        "script": [
+          {"tool": "add", "args": {"a": 2, "b": 3}, "id": "call_add"},
+          {"reply": "5"}
+        ]
+      },
+      "outputs": {
+        "tools": [{"name": "add", "content": 5}],
+        "answer": 5,
+        "authorized": true
+      }
+    },
+    {
+      "id": "multiply-two-numbers",
+      "split": "deterministic",
+      "inputs": {
+        "message": "What is 6 * 7?",
+        "allowed_tools": ["add", "multiply", "echo"],
+        "permissions": ["agents:execute"],
+        "script": [
+          {"tool": "multiply", "args": {"a": 6, "b": 7}, "id": "call_multiply"},
+          {"reply": "42"}
+        ]
+      },
+      "outputs": {
+        "tools": [{"name": "multiply", "content": 42}],
+        "answer": 42,
+        "authorized": true
+      }
+    },
+    {
+      "id": "echo-text",
+      "split": "deterministic",
+      "inputs": {
+        "message": "Echo hello.",
+        "allowed_tools": ["add", "multiply", "echo"],
+        "permissions": ["agents:execute"],
+        "script": [
+          {"tool": "echo", "args": {"text": "hello"}, "id": "call_echo"},
+          {"reply": "hello"}
+        ]
+      },
+      "outputs": {
+        "tools": [{"name": "echo", "content": "hello"}],
+        "answer": "hello",
+        "authorized": true
+      }
+    },
+    {
+      "id": "multiply-not-assigned",
+      "split": "deterministic",
+      "inputs": {
+        "message": "What is 6 * 7?",
+        "allowed_tools": ["add"],
+        "permissions": ["agents:execute"],
+        "script": [
+          {"tool": "multiply", "args": {"a": 6, "b": 7}, "id": "call_multiply_denied"},
+          {"reply": "I cannot do that."}
+        ]
+      },
+      "outputs": {
+        "tools": [
+          {
+            "name": "multiply",
+            "content": "Error: tool 'multiply' is not authorized"
+          }
+        ],
+        "answer": "I cannot do that.",
+        "authorized": false,
+        "attempted_tool": "multiply"
+      }
+    },
+    {
+      "id": "multiply-missing-permission",
+      "split": "deterministic",
+      "inputs": {
+        "message": "What is 6 * 7?",
+        "allowed_tools": ["multiply"],
+        "permissions": [],
+        "script": [
+          {
+            "tool": "multiply",
+            "args": {"a": 6, "b": 7},
+            "id": "call_multiply_forbidden"
+          },
+          {"reply": "I cannot do that."}
+        ]
+      },
+      "outputs": {
+        "tools": [
+          {
+            "name": "multiply",
+            "content": "Error: tool 'multiply' is not authorized"
+          }
+        ],
+        "answer": "I cannot do that.",
+        "authorized": false,
+        "attempted_tool": "multiply"
+      }
+    },
+    {
+      "id": "llm-sum",
+      "split": "llm",
+      "inputs": {
+        "message": "What is 2 + 3? Use the add tool, then reply with only the number.",
+        "allowed_tools": ["add", "multiply", "echo"],
+        "permissions": ["agents:execute"]
+      },
+      "outputs": {
+        "tools": [{"name": "add", "content": 5}],
+        "answer": 5,
+        "authorized": true,
+        "quality_rubric": "The assistant reply is the number 5 and contains nothing else."
+      }
+    }
+  ]
+}

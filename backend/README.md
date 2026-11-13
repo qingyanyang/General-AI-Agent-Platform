@@ -12,6 +12,7 @@ app/
   models/        # SQLAlchemy ORM (schema-qualified)
   schemas/       # Pydantic request/response models
   services/      # Domain services (chat sessions, …)
+evals/           # Offline regression dataset, graders, and optional LangSmith upload
 alembic/         # Migrations (POSTGRES_SCHEMA bootstrapped in env.py)
 tests/
 ```
@@ -420,11 +421,28 @@ export TEST_DATABASE_URL='postgresql+psycopg://...'
 pytest -m business_db
 ```
 
+## Evaluation (#26)
+
+Deterministic runs are regression tests of graph execution, authorization, and the graders. They do not measure whether a real model selects the right tool. Model-quality scores come only from the optional live example.
+
+These tests are CI-ready; run them locally with the documented pytest command. They are not yet running in CI.
+
+`agent-platform-agent-core` is an evaluation-owned LangSmith dataset. The checked-in JSON is the source of truth. `python -m evals --upload` updates existing rows, adds rows that are missing remotely, and **deletes remote examples that are not in the JSON**, including duplicate ids. Upload does not turn tracing on. A local run emits no tracing requests and then restores the previous tracing settings.
+
+```bash
+python -m evals
+# optional live model-quality example; fails if the provider key is missing
+# EVAL_LLM=1 python -m evals
+# optional: LANGSMITH_API_KEY=... python -m evals --upload
+```
+
+A normal run prints `Live model-quality checks: skipped`.
+
 ## Quality
 
 ```bash
-ruff check app tests
-ruff format --check app tests
+ruff check app evals tests
+ruff format --check app evals tests
 pytest
 # optional: CHECKPOINT_TEST_DATABASE_URL=... pytest -m integration
 # optional: TEST_DATABASE_URL=... pytest -m business_db

@@ -1,0 +1,30 @@
+{
+  "description": "Deterministic regression gate for graph execution, authorization, and graders. These scores are not model-quality measurements.",
+  "examples": {
+    "add-two-numbers": {
+      "tool_execution": 1,
+      "final_answer": 1,
+      "authorization": 1
+    },
+    "multiply-two-numbers": {
+      "tool_execution": 1,
+      "final_answer": 1,
+      "authorization": 1
+    },
+    "echo-text": {
+      "tool_execution": 1,
+      "final_answer": 1,
+      "authorization": 1
+    },
+    "multiply-not-assigned": {
+      "tool_execution": 1,
+      "final_answer": 1,
+      "authorization": 1
+    },
+    "multiply-missing-permission": {
+      "tool_execution": 1,
+      "final_answer": 1,
+      "authorization": 1
+    }
+  }
+}
