@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { useAuth0 } from '@auth0/auth0-react'
+import { useEffect, useMemo, useState } from 'react'
 
+import { Workspace } from '@/components/chat/workspace'
 import { Button } from '@/components/ui/button'
-import { apiBaseUrl, apiUrl } from '@/lib/api'
+import { createChatClient, apiBaseUrl, apiUrl } from '@/lib/api'
+import { readAuthConfig } from '@/lib/auth-config'
+import { ApiError } from '@/lib/errors'
 
 type HealthState =
   | { status: 'idle' }
@@ -10,36 +13,39 @@ type HealthState =
   | { status: 'ok'; detail: string }
   | { status: 'error'; detail: string }
 
-function HomePage() {
+function ConfigurationScreen() {
+  return (
+    <main className="mx-auto flex min-h-svh w-full max-w-xl flex-col justify-center px-6 py-16">
+      <p className="text-sm font-medium tracking-[0.18em] text-primary uppercase">
+        Enterprise AI Agent Platform
+      </p>
+      <h1 className="mt-4 text-3xl font-semibold tracking-tight">Auth0 is not configured</h1>
+      <p className="mt-4 text-muted-foreground">
+        Set <code>VITE_AUTH0_DOMAIN</code> (hostname only), <code>VITE_AUTH0_CLIENT_ID</code>,
+        and <code>VITE_AUTH0_AUDIENCE</code> before using protected routes.
+      </p>
+    </main>
+  )
+}
+
+function HealthStatus() {
   const [health, setHealth] = useState<HealthState>({ status: 'idle' })
 
   useEffect(() => {
     if (!apiBaseUrl) {
       return
     }
-
     const controller = new AbortController()
-
     async function checkHealth() {
       setHealth({ status: 'loading' })
       try {
-        const response = await fetch(apiUrl('/health'), {
-          signal: controller.signal,
-        })
+        const response = await fetch(apiUrl('/health'), { signal: controller.signal })
         if (!response.ok) {
-          setHealth({
-            status: 'error',
-            detail: `HTTP ${response.status}`,
-          })
+          setHealth({ status: 'error', detail: `HTTP ${response.status}` })
           return
         }
-        const body = (await response.json().catch(() => null)) as
-          | { status?: string }
-          | null
-        setHealth({
-          status: 'ok',
-          detail: body?.status ?? 'reachable',
-        })
+        const body = (await response.json().catch(() => null)) as { status?: string } | null
+        setHealth({ status: 'ok', detail: body?.status ?? 'reachable' })
       } catch (error) {
         if (controller.signal.aborted) {
           return
@@ -50,64 +56,104 @@ function HomePage() {
         })
       }
     }
-
     void checkHealth()
     return () => controller.abort()
   }, [])
 
+  const detail =
+    health.status === 'idle'
+      ? 'skipped (no API URL)'
+      : health.status === 'loading'
+        ? 'checking…'
+        : health.status === 'ok'
+          ? `ok · ${health.detail}`
+          : `error · ${health.detail}`
+
+  return <p className="mt-8 font-mono text-sm text-muted-foreground">/health · {detail}</p>
+}
+
+function SignInScreen() {
+  const { loginWithRedirect, isLoading, error } = useAuth0()
+
   return (
-    <div className="relative min-h-svh overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_oklch(0.92_0.04_250)_0%,_transparent_55%),linear-gradient(180deg,_oklch(0.985_0.002_247)_0%,_oklch(0.96_0.02_75)_100%)]"
-      />
-      <main className="relative mx-auto flex min-h-svh w-full max-w-3xl flex-col justify-center px-6 py-16">
-        <p className="text-sm font-medium tracking-[0.18em] text-primary uppercase">
-          Enterprise AI Agent Platform
+    <main className="mx-auto flex min-h-svh w-full max-w-xl flex-col justify-center px-6 py-16">
+      <p className="text-sm font-medium tracking-[0.18em] text-primary uppercase">
+        Enterprise AI Agent Platform
+      </p>
+      <h1 className="mt-4 text-4xl font-semibold tracking-tight">Sign in to chat with your agents</h1>
+      <p className="mt-4 text-muted-foreground">
+        Use your organization account. The app requests an access token for the platform API.
+      </p>
+      {error ? (
+        <p className="mt-4 text-sm" role="alert">
+          {error.message}
         </p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-          Human-supervised document automation
-        </h1>
-        <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
-          React + TypeScript frontend scaffold. Wire agent workflows, review
-          steps, and project uploads here as the API lands.
-        </p>
+      ) : null}
+      <div className="mt-8">
+        <Button type="button" disabled={isLoading} onClick={() => void loginWithRedirect()}>
+          Sign in
+        </Button>
+      </div>
+      <HealthStatus />
+    </main>
+  )
+}
 
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Button type="button">Get started</Button>
-          <Button type="button" variant="outline">
-            View roadmap
-          </Button>
-        </div>
+function AuthenticatedApp() {
+  const auth = readAuthConfig()
+  const { isLoading, isAuthenticated, logout, getAccessTokenSilently, user } = useAuth0()
+  const audience = auth?.audience ?? ''
 
-        <dl className="mt-12 grid gap-4 rounded-xl border border-border bg-card/80 p-5 text-sm shadow-sm backdrop-blur">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <dt className="text-muted-foreground">API base URL</dt>
-            <dd className="font-mono text-foreground">
-              {apiBaseUrl || 'not configured (set VITE_API_BASE_URL)'}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <dt className="text-muted-foreground">/health</dt>
-            <dd className="font-mono text-foreground">
-              {health.status === 'idle' && 'skipped (no API URL)'}
-              {health.status === 'loading' && 'checking…'}
-              {health.status === 'ok' && `ok · ${health.detail}`}
-              {health.status === 'error' && `error · ${health.detail}`}
-            </dd>
-          </div>
-        </dl>
+  const client = useMemo(
+    () =>
+      createChatClient(async () => {
+        try {
+          const token = await getAccessTokenSilently({
+            authorizationParams: { audience },
+          })
+          if (!token) {
+            throw new ApiError(401, 'Sign in again.')
+          }
+          return token
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error
+          }
+          throw new ApiError(401, 'Sign in again.')
+        }
+      }),
+    [audience, getAccessTokenSilently],
+  )
+
+  if (isLoading) {
+    return (
+      <main className="flex min-h-svh items-center justify-center text-muted-foreground">
+        Checking your session…
       </main>
-    </div>
+    )
+  }
+
+  if (!isAuthenticated || !auth) {
+    return <SignInScreen />
+  }
+
+  return (
+    <Workspace
+      client={client}
+      accountLabel={user?.name ?? user?.email ?? null}
+      onUnauthorized={() => {
+        void logout({ logoutParams: { returnTo: window.location.origin } })
+      }}
+      onSignOut={() => {
+        void logout({ logoutParams: { returnTo: window.location.origin } })
+      }}
+    />
   )
 }
 
 export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-      </Routes>
-    </BrowserRouter>
-  )
+  if (!readAuthConfig()) {
+    return <ConfigurationScreen />
+  }
+  return <AuthenticatedApp />
 }

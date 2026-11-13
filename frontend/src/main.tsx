@@ -1,11 +1,30 @@
+import { Auth0Provider } from '@auth0/auth0-react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import App from '@/App'
+import { readAuthConfig } from '@/lib/auth-config'
 import '@/index.css'
 
-createRoot(document.getElementById('root')!).render(
+const auth = readAuthConfig()
+const root = createRoot(document.getElementById('root')!)
+
+root.render(
   <StrictMode>
-    <App />
+    {auth ? (
+      <Auth0Provider
+        domain={auth.domain}
+        clientId={auth.clientId}
+        authorizationParams={{
+          audience: auth.audience,
+          redirect_uri: window.location.origin,
+        }}
+        cacheLocation="localstorage"
+      >
+        <App />
+      </Auth0Provider>
+    ) : (
+      <App />
+    )}
   </StrictMode>,
 )

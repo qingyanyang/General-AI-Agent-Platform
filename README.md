@@ -142,7 +142,7 @@ npm install
 npm run dev
 ```
 
-See [`frontend/README.md`](frontend/README.md). Set `VITE_API_BASE_URL` to the API origin.
+See [`frontend/README.md`](frontend/README.md). Set `VITE_API_BASE_URL` and the public `VITE_AUTH0_*` values listed there.
 
 ### Backend
 
