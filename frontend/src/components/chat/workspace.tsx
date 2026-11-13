@@ -1,5 +1,6 @@
 import { Menu, X } from 'lucide-react'
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { MarkdownMessage } from '@/components/chat/markdown-message'
 import { useChatWorkspace, type TranscriptEntry } from '@/components/chat/use-chat-workspace'
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils'
 type WorkspaceProps = {
   client: ChatClient
   accountLabel: string | null
+  showManage?: boolean
   onUnauthorized: () => void
   onSignOut: () => void
 }
@@ -108,6 +110,7 @@ function Transcript({
 export function Workspace({
   client,
   accountLabel,
+  showManage = false,
   onUnauthorized,
   onSignOut,
 }: WorkspaceProps) {
@@ -281,11 +284,16 @@ export function Workspace({
           >
             <Menu className="size-5" />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-medium">
               {chat.selectedSession?.title ?? chat.selectedAgent?.name ?? 'Chat'}
             </h1>
           </div>
+          {showManage ? (
+            <Link to="/manage" className="text-sm font-medium">
+              Manage
+            </Link>
+          ) : null}
         </header>
         {chat.permissionError ? (
           <p className="border-b border-border px-4 py-2 text-sm" role="alert">

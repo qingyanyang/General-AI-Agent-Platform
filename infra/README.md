@@ -107,6 +107,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 | `VITE_AUTH0_DOMAIN` (GitHub var) | frontend-cd | Auth0 tenant hostname, no scheme or path |
 | `VITE_AUTH0_CLIENT_ID` (GitHub var) | frontend-cd | Public EAP Web SPA client id |
 | `VITE_AUTH0_AUDIENCE` (GitHub var) | frontend-cd | API identifier, `https://api.agent-platform` |
+| `VITE_LANGSMITH_PROJECT_URL` (GitHub var, optional) | frontend-cd | Absolute `http://` or `https://` LangSmith project URL. Empty omits the project link. |
 
 **Never** commit `DATABASE_URL`. Prefer the Supabase **session pooler** host (IPv4-friendly), not the direct DB host if the runner/CAE lacks IPv6.
 
@@ -212,7 +213,7 @@ Bicep no longer manages these resources; leaving them undeleted only incurs cost
 
 **Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (optional), `LANGSMITH_API_KEY` (optional), `AZURE_STATIC_WEB_APPS_API_TOKEN`
 
-**Variables:** `CONTAINER_APP_NAME`, `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, optional `RUN_INFRA_WHAT_IF`
+**Variables:** `CONTAINER_APP_NAME`, `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, optional `VITE_LANGSMITH_PROJECT_URL`, optional `RUN_INFRA_WHAT_IF`
 
 ---
 

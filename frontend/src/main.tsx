@@ -1,6 +1,7 @@
 import { Auth0Provider } from '@auth0/auth0-react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 
 import App from '@/App'
 import { readAuthConfig } from '@/lib/auth-config'
@@ -21,10 +22,14 @@ root.render(
         }}
         cacheLocation="localstorage"
       >
-        <App />
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
       </Auth0Provider>
     ) : (
-      <App />
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
     )}
   </StrictMode>,
 )

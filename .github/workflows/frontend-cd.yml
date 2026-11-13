@@ -72,6 +72,7 @@ jobs:
           VITE_AUTH0_DOMAIN: ${{ vars.VITE_AUTH0_DOMAIN }}
           VITE_AUTH0_CLIENT_ID: ${{ vars.VITE_AUTH0_CLIENT_ID }}
           VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE }}
+          VITE_LANGSMITH_PROJECT_URL: ${{ vars.VITE_LANGSMITH_PROJECT_URL }}
         run: npm run build
 
       - name: Deploy to Azure Static Web Apps
