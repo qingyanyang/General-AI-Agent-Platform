@@ -11,18 +11,18 @@ React + TypeScript SPA (Vite) for the Enterprise AI Agent Platform. Deploys to A
 - ESLint + TypeScript ESLint
 - Lightweight shadcn-style `Button` (`class-variance-authority` + `tailwind-merge`)
 
-Requires Node.js 20+.
+Requires Node.js 26+.
 
 ## Scripts
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Local Vite dev server (`http://localhost:5173`) |
-| `npm test` | Vitest |
-| `npm run lint` | ESLint (flat config) |
-| `npm run typecheck` | `tsc -b` |
-| `npm run build` | Typecheck + production build → `dist/` |
-| `npm run preview` | Preview production build |
+| Command             | Purpose                                         |
+| ------------------- | ----------------------------------------------- |
+| `npm run dev`       | Local Vite dev server (`http://localhost:5173`) |
+| `npm test`          | Vitest                                          |
+| `npm run lint`      | ESLint (flat config)                            |
+| `npm run typecheck` | `tsc -b`                                        |
+| `npm run build`     | Typecheck + production build → `dist/`          |
+| `npm run preview`   | Preview production build                        |
 
 ## Setup
 
