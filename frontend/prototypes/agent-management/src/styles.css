@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+@source './';
+
+/* PROTOTYPE design tokens for #52: deep teal accent, white surfaces, neutral background. */
+@theme inline {
+  --font-sans: 'Inter', 'Segoe UI', 'Helvetica Neue', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Charter', 'Source Serif 4', 'Georgia', ui-serif, serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  --color-background: #f6f6f3;
+  --color-foreground: #1d2522;
+  --color-muted: #f0f1ed;
+  --color-muted-foreground: #5f6965;
+  --color-card: #ffffff;
+  --color-border: #e3e5e0;
+  --color-border-strong: #cfd3cc;
+  --color-primary: #1f5a52;
+  --color-primary-hover: #184841;
+  --color-primary-soft: #e8f1ee;
+  --color-primary-foreground: #ffffff;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdf1ef;
+  --color-warning: #8a5a00;
+  --color-warning-soft: #fff5d9;
+  --color-success: #1d6b3f;
+  --color-success-soft: #e9f5ee;
+  --color-info: #285a8a;
+  --color-info-soft: #eaf2fb;
+  --color-ring: #1f5a52;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply m-0 min-h-svh overflow-x-hidden bg-background font-sans text-foreground;
+  }
+
+  #root {
+    @apply min-h-svh;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  dialog::backdrop {
+    background: rgb(29 37 34 / 0.35);
+  }
+}
