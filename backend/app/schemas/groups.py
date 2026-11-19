@@ -9,12 +9,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 GROUP_NAME_MAX_LENGTH = 120
+GROUP_DESCRIPTION_MAX_LENGTH = 4000
 DesignationLiteral = Literal["member", "leader"]
 
 
 class GroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=GROUP_NAME_MAX_LENGTH)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=GROUP_DESCRIPTION_MAX_LENGTH)
 
     @field_validator("name")
     @classmethod
@@ -25,6 +26,14 @@ class GroupCreate(BaseModel):
         if len(stripped) > GROUP_NAME_MAX_LENGTH:
             raise ValueError(f"name must be at most {GROUP_NAME_MAX_LENGTH} characters")
         return stripped
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class GroupOut(BaseModel):

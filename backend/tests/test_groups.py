@@ -17,6 +17,7 @@ from app.core.permissions import (
 )
 from app.models.directory_user import DirectoryUser
 from app.models.group import GroupDesignation, GroupMembership
+from app.schemas.groups import GROUP_DESCRIPTION_MAX_LENGTH
 from app.services import groups as groups_service
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -397,6 +398,38 @@ def test_duplicate_group_name_is_409(
         headers=headers(ADMIN),
     )
     assert conflict.status_code == 409, conflict.text
+
+
+def test_group_description_normalized_and_bounded(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    _seed_directory(db_session, ADMIN)
+    blank = api_client.post(
+        "/groups",
+        json={"name": "Blank Desc", "description": "   "},
+        headers=headers(ADMIN),
+    )
+    assert blank.status_code == 201, blank.text
+    assert blank.json()["description"] is None
+
+    trimmed = api_client.post(
+        "/groups",
+        json={"name": "Trim Desc", "description": "  hello  "},
+        headers=headers(ADMIN),
+    )
+    assert trimmed.status_code == 201, trimmed.text
+    assert trimmed.json()["description"] == "hello"
+
+    too_long = api_client.post(
+        "/groups",
+        json={
+            "name": "Long Desc",
+            "description": "x" * (GROUP_DESCRIPTION_MAX_LENGTH + 1),
+        },
+        headers=headers(ADMIN),
+    )
+    assert too_long.status_code == 422, too_long.text
 
 
 def test_missing_group_and_membership_are_404(
