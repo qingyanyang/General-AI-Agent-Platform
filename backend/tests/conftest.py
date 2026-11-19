@@ -17,6 +17,7 @@ from app.models.agent_access_grant import AgentAccessGrant  # noqa: F401
 from app.models.agent_execution import AgentExecution  # noqa: F401
 from app.models.base import Base, postgres_schema_name
 from app.models.chat_session import ChatSession  # noqa: F401
+from app.models.directory_user import DirectoryUser  # noqa: F401
 from app.models.session_run_gate import SessionRunGate  # noqa: F401
 from app.services.agents import ensure_default_agent
 from fastapi.testclient import TestClient
