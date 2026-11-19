@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from tests.auth_helpers import (
     AUTH0_AUDIENCE,
@@ -67,6 +67,14 @@ def rbac_client(
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     get_settings.cache_clear()
     app.dependency_overrides.clear()
+    from app.services import directory_users
+
+    directory_factory = sessionmaker(
+        bind=db_session.get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+    monkeypatch.setattr(directory_users, "open_directory_session", directory_factory)
     app.dependency_overrides[get_db] = _override_db
     with TestClient(app) as test_client:
         test_client.app.state.auth_http_client = http_client

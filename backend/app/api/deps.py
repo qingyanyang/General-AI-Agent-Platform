@@ -7,6 +7,7 @@ ownership checks share that authenticated identity.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any
 
@@ -27,9 +28,13 @@ from app.core.auth import (
     verify_access_token,
 )
 from app.core.config import get_settings
+from app.services import directory_users
+
+logger = logging.getLogger(__name__)
 
 _NOT_CONFIGURED = "Authentication is not configured"
 _UNAVAILABLE = "Authentication is temporarily unavailable"
+_DIRECTORY_UNAVAILABLE = "Directory persistence is unavailable"
 _UNAUTHORIZED = "Not authenticated"
 _FORBIDDEN = "Permission denied"
 _UNAUTHORIZED_HEADERS = {"WWW-Authenticate": "Bearer"}
@@ -67,7 +72,11 @@ async def jwks_cache_for(request: Request, domain: str) -> JwksCache:
 
 
 async def get_current_user(request: Request) -> AuthenticatedUser:
-    """Validate ``Authorization: Bearer`` once. ``X-User-Id`` is ignored."""
+    """Validate ``Authorization: Bearer`` once. ``X-User-Id`` is ignored.
+
+    Directory persistence runs only after ``verify_access_token`` returns, in
+    its own committed session. Token checks do not touch the database.
+    """
     settings = get_settings()
     audience = (settings.auth0_audience or "").strip()
     if not audience or not (settings.auth0_domain or "").strip():
@@ -78,7 +87,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     try:
         domain = normalize_auth0_domain(settings.auth0_domain or "")
         token = extract_bearer_token(request.headers.get("authorization"))
-        return await verify_access_token(
+        user = await verify_access_token(
             token,
             issuer=issuer_for_domain(domain),
             audience=audience,
@@ -100,6 +109,15 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_UNAVAILABLE,
         ) from None
+    try:
+        await asyncio.to_thread(directory_users.record_authenticated_subject, user.user_id)
+    except directory_users.DirectoryPersistenceError:
+        logger.exception("Directory persistence failed after authentication")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_DIRECTORY_UNAVAILABLE,
+        ) from None
+    return user
 
 
 async def get_current_user_id(

@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from tests.auth_helpers import (
     AUTH0_AUDIENCE,
@@ -79,6 +79,18 @@ def auth_api_client(
     get_settings.cache_clear()
     app.dependency_overrides.clear()
     from app.core.database import get_db
+    from app.services import directory_users
+
+    directory_factory = sessionmaker(
+        bind=db_session.get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+    monkeypatch.setattr(
+        directory_users,
+        "open_directory_session",
+        directory_factory,
+    )
 
     app.dependency_overrides[get_db] = _override_db
     with TestClient(app) as test_client:
@@ -672,6 +684,159 @@ def test_agents_run_session_with_identity_missing_checkpointer_returns_503(
     )
     assert response.status_code == 503
     assert "persistence" in response.json()["detail"].lower()
+
+
+def test_valid_token_records_subject_without_profile_claims(
+    auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from app.models.directory_user import DirectoryUser
+    from app.services import directory_users
+
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    seed_agent_grant(db_session, "auth0|directory-user")
+    seen = [
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 2, tzinfo=UTC),
+    ]
+
+    def _clock() -> datetime:
+        return seen.pop(0)
+
+    monkeypatch.setattr(directory_users, "_utcnow", _clock)
+    token = _token(
+        private_key,
+        subject="auth0|directory-user",
+        extra_claims={"name": "Ada", "email": "ada@example.com"},
+    )
+    headers = bearer_headers(token, extra={"X-User-Id": "spoofed-user"})
+    first = client.post("/sessions", json={"agent_id": "default"}, headers=headers)
+    second = client.get("/sessions", headers=headers)
+    assert first.status_code == 201
+    assert second.status_code == 200
+    db_session.expire_all()
+    rows = list(db_session.query(DirectoryUser).all())
+    assert [row.user_id for row in rows] == ["auth0|directory-user"]
+    assert rows[0].first_seen_at.replace(tzinfo=UTC) == datetime(2026, 1, 1, tzinfo=UTC)
+    assert rows[0].last_seen_at.replace(tzinfo=UTC) == datetime(2026, 1, 2, tzinfo=UTC)
+    assert list(DirectoryUser.__table__.columns.keys()) == [
+        "user_id",
+        "first_seen_at",
+        "last_seen_at",
+    ]
+
+
+def test_rejected_token_does_not_write_directory(
+    auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
+) -> None:
+    from app.models.directory_user import DirectoryUser
+
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    token = _token(private_key, subject="auth0|expired", expires_in=-10)
+    response = client.post(
+        "/sessions",
+        json={"agent_id": "default"},
+        headers=bearer_headers(token),
+    )
+    assert response.status_code == 401
+    db_session.expire_all()
+    assert db_session.query(DirectoryUser).count() == 0
+
+
+def test_authorization_failure_still_records_authenticated_subject(
+    auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
+) -> None:
+    from app.models.directory_user import DirectoryUser
+
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    token = _token(private_key, subject="auth0|no-execute", permissions=[])
+    response = client.post(
+        "/sessions",
+        json={"agent_id": "default"},
+        headers=bearer_headers(token),
+    )
+    assert response.status_code == 403
+    db_session.expire_all()
+    row = db_session.get(DirectoryUser, "auth0|no-execute")
+    assert row is not None
+    assert row.first_seen_at == row.last_seen_at
+
+
+def test_directory_write_failure_returns_503_without_business_work(
+    auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from app.models.chat_session import ChatSession
+    from app.models.directory_user import DirectoryUser
+    from app.services import directory_users
+
+    calls = {"sessions": 0, "model": 0}
+
+    def _create_session(*_args: Any, **_kwargs: Any) -> None:
+        calls["sessions"] += 1
+        raise AssertionError("session handler invoked")
+
+    async def _run_agent(*_args: Any, **_kwargs: Any) -> None:
+        calls["model"] += 1
+        raise AssertionError("model invoked")
+
+    def _fail(_user_id: str) -> None:
+        raise directory_users.DirectoryPersistenceError("disk full")
+
+    monkeypatch.setattr(
+        "app.api.routes.sessions.session_service.create_session",
+        _create_session,
+    )
+    monkeypatch.setattr("app.api.routes.agents.run_agent", _run_agent)
+    monkeypatch.setattr(directory_users, "record_authenticated_subject", _fail)
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    headers = bearer_headers(_token(private_key, subject="auth0|write-fail"))
+    created = client.post("/sessions", json={"agent_id": "default"}, headers=headers)
+    ran = client.post("/agents/run", json={"message": "hello"}, headers=headers)
+    assert created.status_code == 503
+    assert ran.status_code == 503
+    assert "directory persistence" in created.json()["detail"].lower()
+    assert calls == {"sessions": 0, "model": 0}
+    db_session.expire_all()
+    assert db_session.query(DirectoryUser).count() == 0
+    assert db_session.query(ChatSession).count() == 0
+
+
+def test_no_directory_http_api(
+    auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
+) -> None:
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    headers = bearer_headers(_token(private_key))
+    assert client.get("/directory-users", headers=headers).status_code == 404
+    assert (
+        client.post(
+            "/directory-users",
+            json={"user_id": "auth0|posted", "email": "a@example.com"},
+            headers=headers,
+        ).status_code
+        == 404
+    )
+
+
+def test_health_does_not_touch_the_directory(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from app.services import directory_users
+
+    def _forbid() -> Session:
+        raise AssertionError("health opened a directory session")
+
+    monkeypatch.setattr(directory_users, "open_directory_session", _forbid)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
 
 
 def test_verify_access_token_unit(
