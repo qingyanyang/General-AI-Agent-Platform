@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -12,9 +13,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
-from app.models.agent_access_grant import AgentAccessGrant
+from app.models.agent import Agent
 from app.models.chat_session import ChatSession
 from app.schemas.chat_session import DEFAULT_SESSION_TITLE
+from app.services import agent_access as access_service
 
 _CURSOR_SEP = "|"
 
@@ -98,6 +100,7 @@ def list_sessions(
     limit: int,
     cursor: str | None,
     require_view_grant: bool = True,
+    permissions: Collection[str] | None = None,
 ) -> SessionPage:
     """List active owned sessions.
 
@@ -108,9 +111,11 @@ def list_sessions(
     if require_view_grant:
         stmt = stmt.where(
             ChatSession.agent_id.in_(
-                select(AgentAccessGrant.agent_id).where(
-                    AgentAccessGrant.user_id == user_id,
-                    AgentAccessGrant.can_view.is_(True),
+                select(Agent.id).where(
+                    access_service.viewable_agent_id_clause(
+                        user_id=user_id,
+                        permissions=permissions,
+                    ),
                 ),
             ),
         )

@@ -2,6 +2,7 @@ export const AGENTS_READ = 'agents:read'
 export const AGENTS_CONFIGURE = 'agents:configure'
 export const AGENTS_EXECUTE = 'agents:execute'
 export const AGENT_ACCESS_MANAGE = 'agent-access:manage'
+export const PLATFORM_TECHNICAL = 'platform:technical'
 
 function decodeBase64Url(segment: string): string {
   const normalized = segment.replace(/-/g, '+').replace(/_/g, '/')

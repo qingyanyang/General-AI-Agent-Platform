@@ -36,6 +36,7 @@ from app.core.permissions import (
     PERM_AGENTS_CONFIGURE,
     PERM_AGENTS_EXECUTE,
     PERM_AGENTS_READ,
+    PERM_PLATFORM_TECHNICAL,
 )
 from app.models.agent import Agent, AgentStatus
 from app.schemas.agent import (
@@ -113,7 +114,13 @@ def _require_agent(db: Session, agent_id: str) -> Agent:
         raise _http_agent_not_found() from exc
 
 
-def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
+def _ensure_execute(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    permissions: frozenset[str] | set[str] | None = None,
+) -> bool:
     """Require execute; return whether the caller also has view."""
     try:
         access_service.ensure_agent_capability(
@@ -121,6 +128,7 @@ def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
             user_id=user_id,
             agent_id=agent_id,
             capability=access_service.AgentCapability.EXECUTE,
+            permissions=permissions,
         )
     except access_service.AgentAccessDenied as exc:
         raise HTTPException(
@@ -132,6 +140,7 @@ def _ensure_execute(db: Session, *, user_id: str, agent_id: str) -> bool:
         user_id=user_id,
         agent_id=agent_id,
         capability=access_service.AgentCapability.VIEW,
+        permissions=permissions,
     )
 
 
@@ -140,16 +149,28 @@ def _ensure_executable_agent(
     *,
     user_id: str,
     agent_id: str,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> tuple[Agent, bool]:
     """404 missing → 403 no execute → 409 inactive. Returns agent + has_view."""
     agent = _require_agent(db, agent_id)
-    include_history = _ensure_execute(db, user_id=user_id, agent_id=agent_id)
+    include_history = _ensure_execute(
+        db,
+        user_id=user_id,
+        agent_id=agent_id,
+        permissions=permissions,
+    )
     if agent.status != AgentStatus.ACTIVE.value:
         raise _http_inactive()
     return agent, include_history
 
 
-def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> Agent:
+def _ensure_configure(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    permissions: frozenset[str] | set[str] | None = None,
+) -> Agent:
     # Unknown/invalid agent → 404 first (catalog non-disclosure).
     agent = _require_agent(db, agent_id)
     try:
@@ -158,6 +179,7 @@ def _ensure_configure(db: Session, *, user_id: str, agent_id: str) -> Agent:
             user_id=user_id,
             agent_id=agent_id,
             capability=access_service.AgentCapability.CONFIGURE,
+            permissions=permissions,
         )
     except access_service.AgentAccessDenied as exc:
         raise HTTPException(
@@ -182,7 +204,10 @@ def _configuration_out(agent: Agent) -> AgentConfigurationOut:
 @router.post("", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
 def create_agent(
     body: AgentCreate,
-    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    user: Annotated[
+        AuthenticatedUser,
+        Depends(require_permissions(PERM_AGENTS_CONFIGURE, PERM_AGENT_ACCESS_MANAGE)),
+    ],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentOut:
     try:
@@ -224,6 +249,7 @@ def list_agents(
             status=status_filter,
             limit=limit,
             cursor=cursor,
+            permissions=user.permissions,
         )
     except agent_service.AgentValidationError as exc:
         raise HTTPException(
@@ -255,6 +281,7 @@ async def agents_run(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
+                    permissions=user.permissions,
                 )
                 execution_config, tool_auth = execution_bundle(
                     agent,
@@ -280,6 +307,7 @@ async def agents_run(
                     db,
                     user_id=user.user_id,
                     agent_id=agent_id,
+                    permissions=user.permissions,
                 )
                 execution_config, tool_auth = execution_bundle(
                     agent,
@@ -424,6 +452,7 @@ def get_agent(
         user_id=user.user_id,
         agent_id=agent.id,
         capability=access_service.AgentCapability.VIEW,
+        permissions=user.permissions,
     ):
         # Catalog non-disclosure: missing view → 404 (distinct from session 403).
         raise _http_agent_not_found()
@@ -502,13 +531,40 @@ def put_agent_access_config(
     return _access_config_out(view)
 
 
+@router.post("/{agent_id}/access-config/activate", response_model=AgentAccessConfigOut)
+def activate_agent_access_config(
+    agent_id: str,
+    caller: Annotated[
+        AuthenticatedUser,
+        Depends(require_permissions(PERM_AGENT_ACCESS_MANAGE)),
+    ],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentAccessConfigOut:
+    del caller
+    try:
+        view = access_config_service.activate_access_config(db, agent_id=agent_id)
+    except access_config_service.AgentAccessConfigNotFound as exc:
+        raise _http_agent_not_found() from exc
+    except access_config_service.AgentAccessConfigValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return _access_config_out(view)
+
+
 @router.get("/{agent_id}/configuration", response_model=AgentConfigurationOut)
 def get_agent_configuration(
     agent_id: str,
-    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_PLATFORM_TECHNICAL))],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentConfigurationOut:
-    agent = _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    agent = _ensure_configure(
+        db,
+        user_id=user.user_id,
+        agent_id=agent_id,
+        permissions=user.permissions,
+    )
     return _configuration_out(agent)
 
 
@@ -516,10 +572,10 @@ def get_agent_configuration(
 def put_agent_configuration(
     agent_id: str,
     body: AgentConfigurationIn,
-    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_PLATFORM_TECHNICAL))],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentConfigurationOut:
-    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id, permissions=user.permissions)
     try:
         agent = agent_service.update_configuration(
             db,
@@ -555,7 +611,7 @@ def update_agent(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentOut:
-    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id, permissions=user.permissions)
     try:
         agent = agent_service.update_agent(
             db,
@@ -581,7 +637,7 @@ def deactivate_agent(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> AgentOut:
-    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id)
+    _ensure_configure(db, user_id=user.user_id, agent_id=agent_id, permissions=user.permissions)
     try:
         agent = agent_service.deactivate_agent(db, agent_id=agent_id)
     except agent_service.AgentNotFoundError as exc:

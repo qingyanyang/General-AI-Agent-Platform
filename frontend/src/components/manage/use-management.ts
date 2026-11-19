@@ -11,7 +11,12 @@ import type {
   SkillSummary,
   ToolCatalogItem,
 } from '@/lib/management'
-import { AGENT_ACCESS_MANAGE, AGENTS_CONFIGURE, AGENTS_READ } from '@/lib/permissions'
+import {
+  AGENT_ACCESS_MANAGE,
+  AGENTS_CONFIGURE,
+  AGENTS_READ,
+  PLATFORM_TECHNICAL,
+} from '@/lib/permissions'
 
 const DISCARD_MESSAGE = 'Discard unsaved changes?'
 
@@ -153,6 +158,8 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
   const canRead = permissions.has(AGENTS_READ)
   const canConfigure = permissions.has(AGENTS_CONFIGURE)
   const canManageAccess = permissions.has(AGENT_ACCESS_MANAGE)
+  const canTechnical = permissions.has(PLATFORM_TECHNICAL)
+  const canCreateAgent = canConfigure && canManageAccess
   const [agents, setAgents] = useState<AgentRecord[]>([])
   const [agentCursor, setAgentCursor] = useState<string | null>(null)
   const [listLoading, setListLoading] = useState(false)
@@ -266,7 +273,9 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         }
       }
       const metadataForm = metadata ? metadataFromAgent(metadata) : null
-      if (!canConfigure) {
+      // Technical configuration and protected catalogs require platform:technical.
+      // Business metadata remains available with agents:configure alone.
+      if (!canTechnical) {
         return {
           id,
           metadata,
@@ -344,7 +353,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         catalogError,
       }
     },
-    [canConfigure, canRead, client],
+    [canRead, canTechnical, client],
   )
 
   const openAgent = useCallback(
@@ -546,7 +555,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
 
   const saveConfiguration = useCallback(async () => {
     const current = detailRef.current
-    if (!current?.configForm || !canConfigure) {
+    if (!current?.configForm || !canTechnical) {
       return
     }
     let body: AgentConfiguration
@@ -593,9 +602,13 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         setSavingConfig(false)
       }
     }
-  }, [beginSave, canConfigure, client, isCurrentOpen, reportUnauthorized])
+  }, [beginSave, canTechnical, client, isCurrentOpen, reportUnauthorized])
 
   const createAgent = useCallback(async () => {
+    if (!canCreateAgent) {
+      setActionError('Creating an agent requires configure and access-manage permissions.')
+      return
+    }
     const id = createId.trim()
     const name = createName.trim()
     if (!id || !name) {
@@ -626,7 +639,15 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     } finally {
       setCreating(false)
     }
-  }, [client, createDescription, createId, createName, openAgent, reportUnauthorized])
+  }, [
+    canCreateAgent,
+    client,
+    createDescription,
+    createId,
+    createName,
+    openAgent,
+    reportUnauthorized,
+  ])
 
   const deactivate = useCallback(async () => {
     const current = detailRef.current
@@ -858,6 +879,8 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     canRead,
     canConfigure,
     canManageAccess,
+    canTechnical,
+    canCreateAgent,
     agents,
     agentCursor,
     listLoading,

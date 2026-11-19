@@ -13,6 +13,7 @@ from app.core.permissions import (
     PERM_AGENTS_CONFIGURE,
     PERM_AGENTS_EXECUTE,
     PERM_AGENTS_READ,
+    PERM_PLATFORM_TECHNICAL,
 )
 from app.models.agent import Agent
 from app.schemas.agent_config import SYSTEM_PROMPT_MAX_LENGTH
@@ -204,7 +205,9 @@ def test_put_add_tool_requires_tool_permissions(
     def configure_without_execute(request: Request) -> AuthenticatedUser:
         return AuthenticatedUser(
             user_id=request.headers.get("x-user-id", USER),
-            permissions=frozenset({PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ}),
+            permissions=frozenset(
+                {PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ, PERM_PLATFORM_TECHNICAL},
+            ),
         )
 
     api_client.app.dependency_overrides[get_current_user] = configure_without_execute
@@ -233,7 +236,9 @@ def test_put_remove_tool_does_not_require_tool_permissions(
     def configure_without_execute(request: Request) -> AuthenticatedUser:
         return AuthenticatedUser(
             user_id=request.headers.get("x-user-id", USER),
-            permissions=frozenset({PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ}),
+            permissions=frozenset(
+                {PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ, PERM_PLATFORM_TECHNICAL},
+            ),
         )
 
     api_client.app.dependency_overrides[get_current_user] = configure_without_execute

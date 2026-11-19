@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { AccessPanel } from '@/components/manage/access-panel'
 import { Button } from '@/components/ui/button'
 import { useManagement, type ConfigForm, type MetadataForm } from '@/components/manage/use-management'
 import {
@@ -301,6 +303,7 @@ export function ManagementPage({
   const page = useManagement({ client, permissions, onUnauthorized })
   const projectHref = readProjectUrl(projectUrl)
   const detail = page.detail
+  const [audienceEffective, setAudienceEffective] = useState(false)
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-8 px-4 py-6">
@@ -333,7 +336,7 @@ export function ManagementPage({
         </p>
       ) : null}
 
-      {page.canConfigure ? (
+      {page.canCreateAgent ? (
         <section className="space-y-3 rounded-xl border border-border p-4">
           <h2 className="text-sm font-medium">Create agent</h2>
           <Field label="New agent id" value={page.createId} onChange={page.setCreateId} />
@@ -369,7 +372,10 @@ export function ManagementPage({
                 key={agent.id}
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={() => void page.openAgent(agent.id, agent)}
+                onClick={() => {
+                  setAudienceEffective(false)
+                  void page.openAgent(agent.id, agent)
+                }}
               >
                 <span className="font-medium">{agent.name}</span>
                 <span className="mt-1 block text-muted-foreground">
@@ -458,7 +464,7 @@ export function ManagementPage({
               </div>
             </form>
           ) : null}
-          {page.canConfigure && detail.configForm ? (
+          {page.canTechnical && detail.configForm ? (
             <ConfigurationForm
               form={detail.configForm}
               tools={detail.tools}
@@ -477,14 +483,22 @@ export function ManagementPage({
               onSave={() => void page.saveConfiguration()}
             />
           ) : null}
+          {page.canManageAccess ? (
+            <AccessPanel
+              agentId={detail.id}
+              client={client}
+              onUnauthorized={onUnauthorized}
+              onAudienceEffectiveChange={setAudienceEffective}
+            />
+          ) : null}
         </section>
       ) : null}
 
-      {page.canManageAccess ? (
+      {page.canManageAccess && !audienceEffective ? (
         <section className="space-y-3 rounded-xl border border-border p-4">
           <h2 className="text-sm font-medium">Access grants</h2>
           <p className="text-sm text-muted-foreground">
-            Enter an agent id. This does not require the agent to appear in the list.
+            Legacy personal grants. Hidden after group-based access is activated for an agent.
           </p>
           <Field label="Grant agent id" value={page.grantAgentId} onChange={page.setGrantAgentId} />
           <Button type="button" onClick={() => void page.loadGrants(page.grantAgentId)}>

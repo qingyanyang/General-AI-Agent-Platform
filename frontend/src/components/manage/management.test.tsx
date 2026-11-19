@@ -11,12 +11,23 @@ import type {
   LlmModel,
   ManagementClient,
 } from '@/lib/management'
-import { AGENT_ACCESS_MANAGE, AGENTS_CONFIGURE, AGENTS_READ } from '@/lib/permissions'
+import {
+  AGENT_ACCESS_MANAGE,
+  AGENTS_CONFIGURE,
+  AGENTS_READ,
+  PLATFORM_TECHNICAL,
+} from '@/lib/permissions'
 
-const developer = new Set([AGENTS_READ, AGENTS_CONFIGURE])
+const developer = new Set([AGENTS_READ, AGENTS_CONFIGURE, PLATFORM_TECHNICAL])
+const superAdmin = new Set([
+  AGENTS_READ,
+  AGENTS_CONFIGURE,
+  AGENT_ACCESS_MANAGE,
+  PLATFORM_TECHNICAL,
+])
 const reader = new Set([AGENTS_READ])
-const configureOnly = new Set([AGENTS_CONFIGURE])
 const accessAdmin = new Set([AGENTS_READ, AGENT_ACCESS_MANAGE])
+const businessAdmin = new Set([AGENTS_READ, AGENTS_CONFIGURE, AGENT_ACCESS_MANAGE])
 
 const model: LlmModel = {
   provider: 'deepseek',
@@ -85,6 +96,11 @@ function createClient(overrides: Partial<ManagementClient> = {}): ManagementClie
     deactivateAgent: unused,
     getConfiguration: unused,
     putConfiguration: unused,
+    getAccessConfig: unused,
+    putAccessConfig: unused,
+    activateAccessConfig: unused,
+    listGroups: async () => ({ items: [], next_cursor: null }),
+    listAllGroups: async () => [],
     listTools: async () => [{ name: 'echo', description: 'Echo' }],
     listModels: async () => [model],
     listSkills: async () => [],
@@ -128,7 +144,7 @@ describe('ManagementPage', () => {
     const createAgent = vi
       .fn<ManagementClient['createAgent']>()
       .mockRejectedValue(new ApiError(409, 'Agent already exists'))
-    renderPage(createClient({ createAgent }), developer)
+    renderPage(createClient({ createAgent }), superAdmin)
     await user.type(screen.getByRole('textbox', { name: 'New agent id' }), 'support')
     await user.type(screen.getByRole('textbox', { name: 'New agent name' }), 'Support')
     await user.click(screen.getByRole('button', { name: 'Create agent' }))
@@ -349,9 +365,11 @@ describe('ManagementPage', () => {
 
   it('keeps saved skills when skill discovery returns 403', async () => {
     const user = userEvent.setup()
+    const billing = agent('billing', 'Billing')
     const putConfiguration = vi.fn(async (_id: string, body: AgentConfiguration) => body)
     renderPage(
       createClient({
+        getAgent: async () => billing,
         getConfiguration: async () =>
           configuration({
             system_prompt: 'Keep me',
@@ -362,7 +380,7 @@ describe('ManagementPage', () => {
         },
         putConfiguration,
       }),
-      configureOnly,
+      developer,
     )
     await user.type(screen.getByRole('textbox', { name: 'Configuration agent id' }), 'billing')
     await user.click(screen.getByRole('button', { name: 'Open configuration' }))
@@ -585,5 +603,78 @@ describe('ManagementPage', () => {
     expect(screen.queryByRole('button', { name: 'Load more grants' })).not.toBeInTheDocument()
     expect(listGrants).toHaveBeenCalledTimes(1)
     expect(listGrants).toHaveBeenCalledWith('alpha', undefined)
+  })
+
+  it('does not load technical configuration for business Admin without platform:technical', async () => {
+    const user = userEvent.setup()
+    const alpha = agent('alpha', 'Alpha')
+    const getConfiguration = vi.fn(async () => configuration())
+    const listTools = vi.fn(async () => [{ name: 'echo', description: 'Echo' }])
+    renderPage(
+      createClient({
+        listAgents: async () => ({ items: [alpha], next_cursor: null }),
+        getAgent: async () => alpha,
+        getConfiguration,
+        listTools,
+        getAccessConfig: async () => ({
+          agent_id: 'alpha',
+          authorization_mode: 'legacy_grants',
+          audience_effective: false,
+          audience_mode: 'groups',
+          owning_group_id: null,
+          owning_group_name: null,
+          group_ids: [],
+          groups: [],
+          updated_at: '2026-01-01T00:00:00Z',
+        }),
+      }),
+      businessAdmin,
+    )
+    await user.click(await screen.findByRole('button', { name: /Alpha/ }))
+    expect(await screen.findByRole('textbox', { name: 'Name' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Who can use this agent?' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('System prompt')).not.toBeInTheDocument()
+    expect(getConfiguration).not.toHaveBeenCalled()
+    expect(listTools).not.toHaveBeenCalled()
+  })
+
+  it('disables activation while access settings are unsaved and preserves draft on failed save', async () => {
+    const user = userEvent.setup()
+    const alpha = agent('alpha', 'Alpha')
+    const putAccessConfig = vi.fn(async () => {
+      throw new ApiError(422, 'Cannot remove the owning group')
+    })
+    const activateAccessConfig = vi.fn(async () => {
+      throw new Error('should not activate')
+    })
+    renderPage(
+      createClient({
+        listAgents: async () => ({ items: [alpha], next_cursor: null }),
+        getAgent: async () => alpha,
+        getAccessConfig: async () => ({
+          agent_id: 'alpha',
+          authorization_mode: 'legacy_grants',
+          audience_effective: false,
+          audience_mode: 'groups',
+          owning_group_id: null,
+          owning_group_name: null,
+          group_ids: [],
+          groups: [],
+          updated_at: '2026-01-01T00:00:00Z',
+        }),
+        putAccessConfig,
+        activateAccessConfig,
+        listAllGroups: async () => [{ id: 'g1', name: 'Ops', description: null }],
+      }),
+      businessAdmin,
+    )
+    await user.click(await screen.findByRole('button', { name: /Alpha/ }))
+    await screen.findByRole('heading', { name: 'Who can use this agent?' })
+    await user.click(screen.getByRole('checkbox', { name: 'Assign Ops' }))
+    expect(screen.getByRole('button', { name: 'Activate group-based access' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Save access settings' }))
+    expect(await screen.findByText('Cannot remove the owning group')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Assign Ops' })).toBeChecked()
+    expect(activateAccessConfig).not.toHaveBeenCalled()
   })
 })

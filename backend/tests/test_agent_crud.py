@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-import pytest
 from app.agents.tool_policy import permitted_tool_names
 from app.agents.tools import create_default_registry
 from app.api.deps import get_current_user
@@ -241,30 +240,26 @@ def test_update_without_configure_is_403(
     assert response.status_code == 403
 
 
-def test_create_rolls_back_agent_if_grant_upsert_fails(
+def test_create_agent_does_not_write_creator_grant(
     db_session: Session,
-    monkeypatch: MonkeyPatch,
 ) -> None:
-    def boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise RuntimeError("grant upsert failed")
-
-    monkeypatch.setattr(access_service, "upsert_grant", boom)
-    with pytest.raises(RuntimeError, match="grant upsert failed"):
-        agent_service.create_agent(
-            db_session,
-            agent_id="tx-fail",
-            name="Tx Fail",
-            description=None,
-            created_by=USER,
-        )
-    assert db_session.get(Agent, "tx-fail") is None
+    agent = agent_service.create_agent(
+        db_session,
+        agent_id="no-creator-grant",
+        name="No Grant",
+        description=None,
+        created_by=USER,
+    )
+    assert agent.authorization_mode == "audience"
+    assert agent.audience_mode == "groups"
+    assert access_service.get_grant(db_session, user_id=USER, agent_id="no-creator-grant") is None
 
 
-def test_create_upserts_preexisting_orphan_grant(
+def test_create_ignores_preexisting_orphan_grant(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
-    """Pre-#19 orphan grants must not block create or leave a stuck 409."""
+    """Orphan grants must not block create; create does not rewrite them."""
     now = datetime.now(UTC)
     db_session.add(
         AgentAccessGrant(
@@ -290,8 +285,8 @@ def test_create_upserts_preexisting_orphan_grant(
     grant = access_service.get_grant(db_session, user_id=USER, agent_id="legacy")
     assert grant is not None
     assert grant.can_view is True
-    assert grant.can_configure is True
-    assert grant.can_execute is True
+    assert grant.can_configure is False
+    assert grant.can_execute is False
 
 
 def test_inactive_without_execute_is_403_not_409(

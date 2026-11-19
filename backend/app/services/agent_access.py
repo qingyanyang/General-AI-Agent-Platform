@@ -1,7 +1,11 @@
-"""Per-user agent capability grants (#17).
+"""Per-agent capability checks: legacy grants vs audience mode (Issue 4).
 
-FastAPI-free: raise ``AgentAccessDenied`` for missing capabilities; the API layer
-maps that to HTTP 403. Platform Admin does not bypass grants.
+Modes are never OR'd. Legacy grant rows do not authorize audience-mode Agents;
+group membership does not authorize legacy-mode Agents.
+
+``agent-access:manage`` provides administrator-wide Agent scope for audience-mode
+VIEW/EXECUTE/CONFIGURE. Platform action permissions are enforced at the route.
+Technical configuration additionally requires ``platform:technical`` at the route.
 """
 
 from __future__ import annotations
@@ -9,18 +13,24 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ColumnElement
 
 from app.core.auth import USER_ID_MAX_LENGTH
-from app.models.agent import Agent
+from app.core.permissions import PERM_AGENT_ACCESS_MANAGE
+from app.models.agent import Agent, AgentAudienceMode, AgentAuthorizationMode
 from app.models.agent_access_grant import AgentAccessGrant
+from app.models.agent_group_assignment import AgentGroupAssignment
+from app.models.group import GroupMembership
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 
 _CURSOR_SEP = "|"
@@ -48,6 +58,10 @@ class GrantPage:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _has_manage(permissions: Collection[str] | None) -> bool:
+    return permissions is not None and PERM_AGENT_ACCESS_MANAGE in permissions
 
 
 def validate_grant_user_id(user_id: str) -> str:
@@ -84,14 +98,7 @@ def get_grant(db: Session, *, user_id: str, agent_id: str) -> AgentAccessGrant |
     )
 
 
-def user_has_capability(
-    db: Session,
-    *,
-    user_id: str,
-    agent_id: str,
-    capability: AgentCapability,
-) -> bool:
-    grant = get_grant(db, user_id=user_id, agent_id=agent_id)
+def _legacy_grant_allows(grant: AgentAccessGrant | None, capability: AgentCapability) -> bool:
     if grant is None:
         return False
     if capability is AgentCapability.VIEW:
@@ -103,27 +110,151 @@ def user_has_capability(
     raise AssertionError(f"unhandled capability: {capability!r}")
 
 
+def _user_in_assigned_group(db: Session, *, user_id: str, agent_id: str) -> bool:
+    return (
+        db.scalar(
+            select(AgentGroupAssignment.group_id)
+            .join(
+                GroupMembership,
+                GroupMembership.group_id == AgentGroupAssignment.group_id,
+            )
+            .where(
+                AgentGroupAssignment.agent_id == agent_id,
+                GroupMembership.user_id == user_id,
+            )
+            .limit(1),
+        )
+        is not None
+    )
+
+
+def _audience_usage_allows(
+    db: Session,
+    *,
+    agent: Agent,
+    user_id: str,
+    permissions: Collection[str] | None,
+) -> bool:
+    """VIEW/EXECUTE eligibility under audience mode."""
+    if _has_manage(permissions):
+        return True
+    if agent.audience_mode == AgentAudienceMode.COMPANY.value:
+        return True
+    if agent.audience_mode == AgentAudienceMode.GROUPS.value:
+        return _user_in_assigned_group(db, user_id=user_id, agent_id=agent.id)
+    return False
+
+
+def user_has_capability(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    capability: AgentCapability,
+    permissions: Collection[str] | None = None,
+) -> bool:
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return False
+
+    mode = agent.authorization_mode
+    if mode == AgentAuthorizationMode.LEGACY_GRANTS.value:
+        return _legacy_grant_allows(
+            get_grant(db, user_id=user_id, agent_id=agent_id),
+            capability,
+        )
+
+    if mode == AgentAuthorizationMode.AUDIENCE.value:
+        if capability is AgentCapability.CONFIGURE:
+            return _has_manage(permissions)
+        if capability in {AgentCapability.VIEW, AgentCapability.EXECUTE}:
+            return _audience_usage_allows(
+                db,
+                agent=agent,
+                user_id=user_id,
+                permissions=permissions,
+            )
+        raise AssertionError(f"unhandled capability: {capability!r}")
+
+    return False
+
+
 def ensure_agent_capability(
     db: Session,
     *,
     user_id: str,
     agent_id: str,
     capability: AgentCapability,
+    permissions: Collection[str] | None = None,
 ) -> None:
     if not user_has_capability(
         db,
         user_id=user_id,
         agent_id=agent_id,
         capability=capability,
+        permissions=permissions,
     ):
         raise AgentAccessDenied
 
 
-def viewable_agent_ids(db: Session, *, user_id: str) -> set[str]:
-    rows = db.scalars(
-        select(AgentAccessGrant.agent_id).where(
+def viewable_agent_id_clause(
+    *,
+    user_id: str,
+    permissions: Collection[str] | None,
+) -> ColumnElement[bool]:
+    """SQL predicate: Agent.id is viewable for this caller (filter before pagination)."""
+    legacy_ids = (
+        select(AgentAccessGrant.agent_id)
+        .where(
             AgentAccessGrant.user_id == user_id,
             AgentAccessGrant.can_view.is_(True),
+        )
+        .scalar_subquery()
+    )
+    membership_agent_ids = (
+        select(AgentGroupAssignment.agent_id)
+        .join(
+            GroupMembership,
+            GroupMembership.group_id == AgentGroupAssignment.group_id,
+        )
+        .where(GroupMembership.user_id == user_id)
+        .scalar_subquery()
+    )
+
+    clauses: list[Any] = [
+        # Legacy: grant view only when mode is legacy_grants.
+        (
+            (Agent.authorization_mode == AgentAuthorizationMode.LEGACY_GRANTS.value)
+            & Agent.id.in_(legacy_ids)
+        ),
+        # Audience company-wide: any authenticated caller.
+        (
+            (Agent.authorization_mode == AgentAuthorizationMode.AUDIENCE.value)
+            & (Agent.audience_mode == AgentAudienceMode.COMPANY.value)
+        ),
+        # Audience selected groups: membership in an assigned group.
+        (
+            (Agent.authorization_mode == AgentAuthorizationMode.AUDIENCE.value)
+            & (Agent.audience_mode == AgentAudienceMode.GROUPS.value)
+            & Agent.id.in_(membership_agent_ids)
+        ),
+    ]
+    if _has_manage(permissions):
+        # Manage: all audience-mode agents (including empty selected-group sets).
+        clauses.append(Agent.authorization_mode == AgentAuthorizationMode.AUDIENCE.value)
+
+    return or_(*clauses)
+
+
+def viewable_agent_ids(
+    db: Session,
+    *,
+    user_id: str,
+    permissions: Collection[str] | None = None,
+) -> set[str]:
+    rows = db.scalars(
+        select(Agent.id).where(
+            viewable_agent_id_clause(user_id=user_id, permissions=permissions),
         ),
     ).all()
     return set(rows)
