@@ -15,6 +15,7 @@ from app.main import app
 from app.models.agent import Agent  # noqa: F401
 from app.models.agent_access_grant import AgentAccessGrant  # noqa: F401
 from app.models.agent_execution import AgentExecution  # noqa: F401
+from app.models.agent_group_assignment import AgentGroupAssignment  # noqa: F401
 from app.models.base import Base, postgres_schema_name
 from app.models.chat_session import ChatSession  # noqa: F401
 from app.models.directory_user import DirectoryUser  # noqa: F401

@@ -31,10 +31,10 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_alembic_has_single_head_at_groups() -> None:
+def test_alembic_has_single_head_at_agent_access_config() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261119_0010", "(head)"]
+    assert result.stdout.split() == ["20261119_0011", "(head)"]
 
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
@@ -65,6 +65,17 @@ def test_groups_migration_creates_groups_and_memberships() -> None:
     assert "ck_group_memberships_designation" in result.stdout
     assert "fk_group_memberships_user_id" in result.stdout
     assert "ix_group_memberships_user_id" in result.stdout
+
+
+def test_agent_access_config_migration_adds_staged_audience_fields() -> None:
+    result = _run("-m", "alembic", "upgrade", "20261119_0010:20261119_0011", "--sql")
+    assert result.returncode == 0, result.stderr
+    assert "authorization_mode" in result.stdout
+    assert "audience_mode" in result.stdout
+    assert "owning_group_id" in result.stdout
+    assert "CREATE TABLE agent_platform.agent_group_assignments" in result.stdout
+    assert "ck_agents_authorization_mode" in result.stdout
+    assert "fk_agents_owning_group_id" in result.stdout
 
 
 def test_human_approval_migration_adds_gate_and_timing_columns() -> None:

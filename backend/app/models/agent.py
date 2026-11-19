@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import DateTime, Float, Index, String, Text, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -18,10 +30,29 @@ class AgentStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+class AgentAuthorizationMode(StrEnum):
+    LEGACY_GRANTS = "legacy_grants"
+    AUDIENCE = "audience"
+
+
+class AgentAudienceMode(StrEnum):
+    COMPANY = "company"
+    GROUPS = "groups"
+
+
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (
         Index("ix_agents_status_created_at", "status", "created_at"),
+        CheckConstraint(
+            "authorization_mode IN ('legacy_grants', 'audience')",
+            name="ck_agents_authorization_mode",
+        ),
+        CheckConstraint(
+            "audience_mode IS NULL OR audience_mode IN ('company', 'groups')",
+            name="ck_agents_audience_mode",
+        ),
+        Index("ix_agents_owning_group_id", "owning_group_id"),
         {"schema": postgres_schema_name()},
     )
 
@@ -56,4 +87,21 @@ class Agent(Base):
     )
     approval_tool_names: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Staged access audience / owning group (Issue 3). Not enforced until Issue 4.
+    authorization_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=AgentAuthorizationMode.LEGACY_GRANTS.value,
+        server_default=text("'legacy_grants'"),
+    )
+    audience_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    owning_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            f"{postgres_schema_name()}.groups.id",
+            ondelete="SET NULL",
+            name="fk_agents_owning_group_id",
+        ),
+        nullable=True,
     )

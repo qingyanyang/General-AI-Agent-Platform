@@ -32,6 +32,7 @@ from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.permissions import (
+    PERM_AGENT_ACCESS_MANAGE,
     PERM_AGENTS_CONFIGURE,
     PERM_AGENTS_EXECUTE,
     PERM_AGENTS_READ,
@@ -44,9 +45,15 @@ from app.schemas.agent import (
     AgentStatusFilter,
     AgentUpdate,
 )
+from app.schemas.agent_access_config import (
+    AgentAccessConfigGroupOut,
+    AgentAccessConfigOut,
+    AgentAccessConfigUpdate,
+)
 from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
 from app.schemas.approval import PendingApproval
 from app.services import agent_access as access_service
+from app.services import agent_access_config as access_config_service
 from app.services import agent_executions as execution_service
 from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
@@ -421,6 +428,78 @@ def get_agent(
         # Catalog non-disclosure: missing view → 404 (distinct from session 403).
         raise _http_agent_not_found()
     return AgentOut.model_validate(agent)
+
+
+def _access_config_out(view: access_config_service.AccessConfigView) -> AgentAccessConfigOut:
+    return AgentAccessConfigOut(
+        agent_id=view.agent_id,
+        authorization_mode=view.authorization_mode,  # type: ignore[arg-type]
+        audience_effective=view.audience_effective,
+        audience_mode=view.audience_mode,  # type: ignore[arg-type]
+        owning_group_id=view.owning_group_id,
+        owning_group_name=view.owning_group_name,
+        group_ids=view.group_ids,
+        groups=[
+            AgentAccessConfigGroupOut(
+                group_id=item.group_id,
+                name=item.name,
+                is_owning=item.is_owning,
+            )
+            for item in view.groups
+        ],
+        updated_at=view.updated_at,
+    )
+
+
+@router.get("/{agent_id}/access-config", response_model=AgentAccessConfigOut)
+def get_agent_access_config(
+    agent_id: str,
+    caller: Annotated[
+        AuthenticatedUser,
+        Depends(require_permissions(PERM_AGENT_ACCESS_MANAGE)),
+    ],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentAccessConfigOut:
+    del caller
+    try:
+        view = access_config_service.get_access_config(db, agent_id=agent_id)
+    except access_config_service.AgentAccessConfigNotFound as exc:
+        raise _http_agent_not_found() from exc
+    return _access_config_out(view)
+
+
+@router.put("/{agent_id}/access-config", response_model=AgentAccessConfigOut)
+def put_agent_access_config(
+    agent_id: str,
+    body: AgentAccessConfigUpdate,
+    caller: Annotated[
+        AuthenticatedUser,
+        Depends(require_permissions(PERM_AGENT_ACCESS_MANAGE)),
+    ],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentAccessConfigOut:
+    del caller
+    try:
+        view = access_config_service.update_access_config(
+            db,
+            agent_id=agent_id,
+            audience_mode=body.audience_mode,
+            owning_group_id=body.owning_group_id,
+            group_ids=body.group_ids,
+        )
+    except access_config_service.AgentAccessConfigNotFound as exc:
+        raise _http_agent_not_found() from exc
+    except access_config_service.GroupNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Group not found",
+        ) from exc
+    except access_config_service.AgentAccessConfigValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return _access_config_out(view)
 
 
 @router.get("/{agent_id}/configuration", response_model=AgentConfigurationOut)
