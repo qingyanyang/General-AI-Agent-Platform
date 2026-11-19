@@ -5,6 +5,7 @@ from app.models.agent_access_grant import AgentAccessGrant
 from app.models.agent_execution import AgentExecution
 from app.models.chat_session import ChatSession
 from app.models.directory_user import DirectoryUser
+from app.models.group import Group, GroupMembership
 
 __all__ = [
     "Agent",
@@ -12,4 +13,6 @@ __all__ = [
     "AgentExecution",
     "ChatSession",
     "DirectoryUser",
+    "Group",
+    "GroupMembership",
 ]

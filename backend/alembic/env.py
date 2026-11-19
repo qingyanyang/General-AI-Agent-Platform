@@ -15,6 +15,7 @@ from app.models.agent_access_grant import AgentAccessGrant  # noqa: F401 — reg
 from app.models.base import Base, postgres_schema_name
 from app.models.chat_session import ChatSession  # noqa: F401 — register metadata
 from app.models.directory_user import DirectoryUser  # noqa: F401 — register metadata
+from app.models.group import Group, GroupMembership  # noqa: F401 — register metadata
 from app.models.session_run_gate import SessionRunGate  # noqa: F401 — register metadata
 
 config = context.config

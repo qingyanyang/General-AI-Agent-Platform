@@ -31,10 +31,10 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_alembic_has_single_head_at_directory_users() -> None:
+def test_alembic_has_single_head_at_groups() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261118_0009", "(head)"]
+    assert result.stdout.split() == ["20261119_0010", "(head)"]
 
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
@@ -54,6 +54,17 @@ def test_directory_users_migration_creates_subject_table() -> None:
     assert "first_seen_at TIMESTAMP WITH TIME ZONE NOT NULL" in result.stdout
     assert "last_seen_at TIMESTAMP WITH TIME ZONE NOT NULL" in result.stdout
     assert "PRIMARY KEY (user_id)" in result.stdout
+
+
+def test_groups_migration_creates_groups_and_memberships() -> None:
+    result = _run("-m", "alembic", "upgrade", "20261118_0009:20261119_0010", "--sql")
+    assert result.returncode == 0, result.stderr
+    assert "CREATE TABLE agent_platform.groups" in result.stdout
+    assert "CREATE TABLE agent_platform.group_memberships" in result.stdout
+    assert "uq_groups_name" in result.stdout
+    assert "ck_group_memberships_designation" in result.stdout
+    assert "fk_group_memberships_user_id" in result.stdout
+    assert "ix_group_memberships_user_id" in result.stdout
 
 
 def test_human_approval_migration_adds_gate_and_timing_columns() -> None:
