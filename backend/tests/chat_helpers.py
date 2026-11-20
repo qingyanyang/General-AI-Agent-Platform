@@ -8,6 +8,7 @@ from app.agents.tool_policy import BUILTIN_TOOL_NAMES, ToolAuthContext
 from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.models.agent import Agent, AgentStatus
 from app.services import agent_access as access_service
+from app.services.agent_instruction_skills import PublishedInstructionSkill
 from app.services.agents import DEFAULT_AGENT_ID, AgentExecutionConfig, ensure_default_agent
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
@@ -34,6 +35,7 @@ def default_execution_config(
     tool_names: tuple[str, ...] | None = None,
     skill_names: tuple[str, ...] = (),
     approval_tool_names: tuple[str, ...] = (),
+    instruction_skills: tuple[PublishedInstructionSkill, ...] = (),
 ) -> AgentExecutionConfig:
     """Immutable config snapshot for unit tests that call run_agent / stream_agent."""
     tools = tuple(sorted(BUILTIN_TOOL_NAMES)) if tool_names is None else tool_names
@@ -46,6 +48,7 @@ def default_execution_config(
         tool_names=tools,
         skill_names=skill_names,
         approval_tool_names=approval_tool_names,
+        instruction_skills=instruction_skills,
     )
 
 

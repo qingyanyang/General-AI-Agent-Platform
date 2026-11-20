@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.agents.checkpointer import thread_id_for_session
 from app.agents.errors import AgentExecutionError, AgentNotConfiguredError
 from app.agents.runtime import read_pending_despite_cancellation, run_agent
-from app.api.deps import require_permissions
+from app.api.deps import get_current_user, require_permissions
 from app.api.execution import execution_bundle
 from app.api.execution_records import (
     CANCELLED,
@@ -52,10 +52,16 @@ from app.schemas.agent_access_config import (
     AgentAccessConfigUpdate,
 )
 from app.schemas.agent_config import AgentConfigurationIn, AgentConfigurationOut
+from app.schemas.agent_instruction_skills import (
+    InstructionSkillItemOut,
+    InstructionSkillsOut,
+    InstructionSkillsReplaceIn,
+)
 from app.schemas.approval import PendingApproval
 from app.services import agent_access as access_service
 from app.services import agent_access_config as access_config_service
 from app.services import agent_executions as execution_service
+from app.services import agent_instruction_skills as instruction_service
 from app.services import agents as agent_service
 from app.services import chat_sessions as session_service
 
@@ -284,6 +290,7 @@ async def agents_run(
                     permissions=user.permissions,
                 )
                 execution_config, tool_auth = execution_bundle(
+                    db,
                     agent,
                     user_id=user.user_id,
                     permissions=user.permissions,
@@ -310,6 +317,7 @@ async def agents_run(
                     permissions=user.permissions,
                 )
                 execution_config, tool_auth = execution_bundle(
+                    db,
                     agent,
                     user_id=user.user_id,
                     permissions=user.permissions,
@@ -551,6 +559,91 @@ def activate_agent_access_config(
             detail=str(exc),
         ) from exc
     return _access_config_out(view)
+
+
+def _instruction_skills_out(
+    items: list[instruction_service.InstructionSkillView],
+) -> InstructionSkillsOut:
+    return InstructionSkillsOut(
+        items=[
+            InstructionSkillItemOut(
+                id=item.id,
+                name=item.name,
+                description=item.description,
+                instructions=item.instructions,
+            )
+            for item in items
+        ],
+    )
+
+
+@router.get("/{agent_id}/instruction-skills", response_model=InstructionSkillsOut)
+def get_agent_instruction_skills(
+    agent_id: str,
+    caller: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> InstructionSkillsOut:
+    _require_agent(db, agent_id)
+    try:
+        access_service.ensure_instruction_skills_edit(
+            db,
+            user_id=caller.user_id,
+            agent_id=agent_id,
+            permissions=caller.permissions,
+        )
+    except access_service.AgentAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_ACCESS_DENIED,
+        ) from exc
+    try:
+        items = instruction_service.list_instruction_skills(db, agent_id=agent_id)
+    except instruction_service.InstructionSkillsNotFound as exc:
+        raise _http_agent_not_found() from exc
+    return _instruction_skills_out(items)
+
+
+@router.put("/{agent_id}/instruction-skills", response_model=InstructionSkillsOut)
+def put_agent_instruction_skills(
+    agent_id: str,
+    body: InstructionSkillsReplaceIn,
+    caller: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> InstructionSkillsOut:
+    _require_agent(db, agent_id)
+    try:
+        access_service.ensure_instruction_skills_edit(
+            db,
+            user_id=caller.user_id,
+            agent_id=agent_id,
+            permissions=caller.permissions,
+        )
+    except access_service.AgentAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_ACCESS_DENIED,
+        ) from exc
+    try:
+        items = instruction_service.replace_instruction_skills(
+            db,
+            agent_id=agent_id,
+            items=body.items,
+            user_id=caller.user_id,
+            permissions=caller.permissions,
+        )
+    except instruction_service.InstructionSkillsNotFound as exc:
+        raise _http_agent_not_found() from exc
+    except access_service.AgentAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_ACCESS_DENIED,
+        ) from exc
+    except instruction_service.InstructionSkillsValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return _instruction_skills_out(items)
 
 
 @router.get("/{agent_id}/configuration", response_model=AgentConfigurationOut)

@@ -108,6 +108,7 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 | `PATCH` | `/agents/{agent_id}` | `agents:configure` + CONFIGURE scope — `name` / `description` only |
 | `GET`/`PUT` | `/agents/{agent_id}/access-config` | `agent-access:manage` — audience/owning-group configuration |
 | `POST` | `/agents/{agent_id}/access-config/activate` | `agent-access:manage` — sets `authorization_mode=audience` from saved config; does not delete grants |
+| `GET`/`PUT` | `/agents/{agent_id}/instruction-skills` | authenticated; `agent-access:manage` **or** Leader of this Agent's `owning_group_id` — published business Instruction Skills |
 | `GET` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — system prompt, LLM, temperature, tool and skill assignments |
 | `PUT` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — full replace (row-locked) |
 | `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + CONFIGURE scope — soft-deactivate (idempotent) |
@@ -123,8 +124,8 @@ Persisted per agent: `system_prompt` (exact max **20 000** characters; whitesp
 
 - **GET/PUT** `/agents/{id}/configuration` require `platform:technical` plus mode-specific CONFIGURE scope (legacy: configure grant; audience: `agent-access:manage`). Configure grants alone never bypass `platform:technical`. Prompt, tool, and skill lists are not returned on `AgentOut` list/get.
 - **Disclosure caveat:** configure-gated GET protects the stored prompt from users without configure access, but a model may still echo or paraphrase prompt content in replies visible to executors.
-- **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once, builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools and skills, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
-- **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history. Assigned skill **names and descriptions** are appended to that ephemeral catalog; full skill instructions are not.
+- **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once (including published Instruction Skills), builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools and skills, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
+- **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history. Published Instruction Skills are composed next (stored order), then curated skill **names and descriptions**; full curated skill instructions still load only via `load_skill`.
 - **Tool assignment:** adding a tool checks the caller's permissions against that tool's `required_permissions`; removing a tool does not. Runtime authorization uses `ToolAuthContext.allowed_tools` from the snapshot (replaces the former code allowlist map). The internal `load_skill` tool cannot be persisted in `tool_names`.
 - Migration `20261111_0005` backfills fixed DeepSeek literals (`deepseek` / `deepseek-flash` / `temperature=1.0`); `default` also gets built-in tools. Migration `20261112_0007` adds `skill_names` defaulting to `[]`. Application `POST /agents` defaults come from settings + catalog (no silent “first catalog entry” fallback if `LLM_PROVIDER`/`LLM_MODEL` are unapproved).
 
@@ -386,6 +387,21 @@ Redirects are not followed unless the target is the approved URL or that URL wit
 `isError=true` becomes a tool-execution `ToolMessage` (`Tool execution error for '{name}'`). Timeouts and transport failures use `Tool connection error for '{name}'`. Neither message includes the raw exception. Caller cancellation closes the session and client, then propagates; it is not turned into a tool error. Shutdown itself has `MCP_CLEANUP_TIMEOUT_SECONDS` so a hung close cannot hold the request. A result that already arrived is returned even if the session DELETE or client close hangs or fails.
 
 If an agent's saved `tool_names` includes a tool that was not in the startup catalog, execution preflight returns HTTP 503 before the model runs and before SSE response headers. The saved `tool_names` are left unchanged.
+
+### Published Instruction Skills (Issue 5)
+
+Per-agent **business** instructions distinct from the technical `system_prompt` and from curated `#23` skills.
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/agents/{agent_id}/instruction-skills` | `get_current_user`; then manage **or** owning-group Leader |
+| `PUT` | `/agents/{agent_id}/instruction-skills` | same — full replacement is publication |
+
+- **Fields:** ordered `items[]` of `{ name, description, instructions }` (prototype-aligned). No resource/script/tool/permission fields. Unknown JSON fields are rejected.
+- **Limits:** at most **50** items; `name` ≤ 120 (trimmed, non-empty, unique case-insensitive); `description` ≤ 2 000 (trimmed, may be empty); `instructions` ≤ 20 000 (reject whitespace-only; preserve accepted text exactly); aggregate length of all submitted name+description+instructions ≤ **50 000**. Empty `items` clears the published collection.
+- **Authorization:** `agent-access:manage`, or current Leader of this Agent's `owning_group_id`. Null owning group → no Leader editing. Audience-only leadership, `agents:configure` alone, and `platform:technical` alone are insufficient. Editing does not activate audience mode or change group memberships. Unknown Agent → **404**; existing Agent without edit rights → **403**. Unauthenticated → **401**.
+- **Persistence:** table `agent_instruction_skills`; PUT locks the Agent row (`FOR UPDATE`), re-checks authorization, validates **before** deletes, then replaces in one transaction. SQLite tests do **not** prove PostgreSQL row-lock concurrency.
+- **Runtime:** loaded into the immutable execution snapshot at the API boundary (JSON, SSE, stateless/session run, approval resume). Composed into the ephemeral system prompt after `system_prompt` and before the curated skill catalog. Not tools, not `skill_names`, not checkpointed messages. Publication affects the **next** request's snapshot; an in-flight snapshot is unchanged. Resume keeps the frozen tool batch; the following model call sees the new instructions.
 
 ### Agent skills (#23)
 

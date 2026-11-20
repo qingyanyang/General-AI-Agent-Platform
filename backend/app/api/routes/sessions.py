@@ -331,6 +331,7 @@ async def create_message(
         owned_session_id = chat_session.id
         agent_id = agent.id
         execution_config, tool_auth = execution_bundle(
+            db,
             agent,
             user_id=user.user_id,
             permissions=user.permissions,
@@ -475,6 +476,7 @@ async def stream_message(
         agent_id = agent.id
         # Preflight before StreamingResponse so config failures are HTTP 503.
         execution_config, tool_auth = execution_bundle(
+            db,
             agent,
             user_id=user.user_id,
             permissions=user.permissions,
@@ -631,6 +633,7 @@ async def list_approvals(
     )
     agent = _require_agent(db, chat_session.agent_id)
     execution_config, _tool_auth = execution_bundle(
+        db,
         agent,
         user_id=user.user_id,
         permissions=user.permissions,
@@ -723,6 +726,7 @@ async def _decide_approval(
         assert execution_id is not None
         assert checkpoint_id is not None
         execution_config, tool_auth = execution_bundle(
+            db,
             agent,
             user_id=user.user_id,
             permissions=user.permissions,

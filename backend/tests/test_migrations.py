@@ -31,10 +31,10 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_alembic_has_single_head_at_agent_access_config() -> None:
+def test_alembic_has_single_head_at_instruction_skills() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261119_0011", "(head)"]
+    assert result.stdout.split() == ["20261120_0012", "(head)"]
 
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
@@ -76,6 +76,15 @@ def test_agent_access_config_migration_adds_staged_audience_fields() -> None:
     assert "CREATE TABLE agent_platform.agent_group_assignments" in result.stdout
     assert "ck_agents_authorization_mode" in result.stdout
     assert "fk_agents_owning_group_id" in result.stdout
+
+
+def test_instruction_skills_migration_creates_table() -> None:
+    result = _run("-m", "alembic", "upgrade", "20261119_0011:20261120_0012", "--sql")
+    assert result.returncode == 0, result.stderr
+    assert "CREATE TABLE agent_platform.agent_instruction_skills" in result.stdout
+    assert "uq_agent_instruction_skills_agent_position" in result.stdout
+    assert "fk_agent_instruction_skills_agent_id" in result.stdout
+    assert "ix_agent_instruction_skills_agent_id" in result.stdout
 
 
 def test_human_approval_migration_adds_gate_and_timing_columns() -> None:

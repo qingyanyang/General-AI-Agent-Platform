@@ -281,6 +281,7 @@ def test_execution_bundle_adds_load_skill_only_when_skills_assigned(
 ) -> None:
     agent = seed_agent(db_session, "skills-agent", tool_names=[], skill_names=[])
     _config, auth = execution_bundle(
+        db_session,
         agent,
         user_id=USER,
         permissions=frozenset({PERM_AGENTS_EXECUTE}),
@@ -295,6 +296,7 @@ def test_execution_bundle_adds_load_skill_only_when_skills_assigned(
         skill_names=["summarize_brief"],
     )
     _config, auth = execution_bundle(
+        db_session,
         agent,
         user_id=USER,
         permissions=frozenset({PERM_AGENTS_EXECUTE}),

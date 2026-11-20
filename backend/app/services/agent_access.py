@@ -30,7 +30,7 @@ from app.core.permissions import PERM_AGENT_ACCESS_MANAGE
 from app.models.agent import Agent, AgentAudienceMode, AgentAuthorizationMode
 from app.models.agent_access_grant import AgentAccessGrant
 from app.models.agent_group_assignment import AgentGroupAssignment
-from app.models.group import GroupMembership
+from app.models.group import GroupDesignation, GroupMembership
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 
 _CURSOR_SEP = "|"
@@ -192,6 +192,77 @@ def ensure_agent_capability(
         user_id=user_id,
         agent_id=agent_id,
         capability=capability,
+        permissions=permissions,
+    ):
+        raise AgentAccessDenied
+
+
+def _user_is_owning_group_leader(
+    db: Session,
+    *,
+    user_id: str,
+    owning_group_id: uuid.UUID,
+) -> bool:
+    membership = db.get(GroupMembership, (owning_group_id, user_id))
+    return (
+        membership is not None
+        and membership.designation == GroupDesignation.LEADER.value
+    )
+
+
+def user_can_edit_instruction_skills(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    permissions: Collection[str] | None = None,
+) -> bool:
+    """True when manage or Leader of this Agent's owning group.
+
+    Leadership in an audience-only (non-owning) group does not qualify.
+    A null owning group means no Leader editing. Does not grant Chat execution.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return False
+    return user_can_edit_instruction_skills_for_agent(
+        db,
+        agent=agent,
+        user_id=user_id,
+        permissions=permissions,
+    )
+
+
+def user_can_edit_instruction_skills_for_agent(
+    db: Session,
+    *,
+    agent: Agent,
+    user_id: str,
+    permissions: Collection[str] | None = None,
+) -> bool:
+    """Same decision as ``user_can_edit_instruction_skills`` for a locked Agent row."""
+    if _has_manage(permissions):
+        return True
+    if agent.owning_group_id is None:
+        return False
+    return _user_is_owning_group_leader(
+        db,
+        user_id=user_id,
+        owning_group_id=agent.owning_group_id,
+    )
+
+
+def ensure_instruction_skills_edit(
+    db: Session,
+    *,
+    user_id: str,
+    agent_id: str,
+    permissions: Collection[str] | None = None,
+) -> None:
+    if not user_can_edit_instruction_skills(
+        db,
+        user_id=user_id,
+        agent_id=agent_id,
         permissions=permissions,
     ):
         raise AgentAccessDenied
