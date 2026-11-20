@@ -13,7 +13,7 @@ type AccessPanelProps = {
   agentId: string
   client: ManagementClient
   onUnauthorized: () => void
-  onAudienceEffectiveChange?: (effective: boolean) => void
+  onAudienceEffectiveChange?: (agentId: string, effective: boolean) => void
 }
 
 type Draft = {
@@ -75,6 +75,12 @@ export function AccessPanel({
     return !draftsEqual(draft, draftFromConfig(saved))
   }, [draft, saved])
 
+  useEffect(() => {
+    if (dirty) {
+      setConfirmActivate(false)
+    }
+  }, [dirty])
+
   const load = async () => {
     const current = ++ticket.current
     setLoading(true)
@@ -90,11 +96,12 @@ export function AccessPanel({
       setSaved(config)
       setDraft(draftFromConfig(config))
       setGroups(allGroups)
-      onAudienceEffectiveChange?.(config.audience_effective)
+      onAudienceEffectiveChange?.(agentId, config.audience_effective)
     } catch (caught) {
       if (ticket.current !== current) {
         return
       }
+      onAudienceEffectiveChange?.(agentId, false)
       if (isApiError(caught) && caught.status === 401) {
         onUnauthorized()
         return
@@ -131,7 +138,7 @@ export function AccessPanel({
       })
       setSaved(updated)
       setDraft(draftFromConfig(updated))
-      onAudienceEffectiveChange?.(updated.audience_effective)
+      onAudienceEffectiveChange?.(agentId, updated.audience_effective)
       setStatus(
         updated.audience_effective
           ? 'Access changes saved. They take effect on subsequent requests.'
@@ -150,7 +157,12 @@ export function AccessPanel({
   }
 
   const activate = async () => {
-    if (!saved || dirty || saving || activating) {
+    if (!saved || saving || activating) {
+      return
+    }
+    if (dirty) {
+      setConfirmActivate(false)
+      setError('Save access settings before activating.')
       return
     }
     setActivating(true)
@@ -161,7 +173,7 @@ export function AccessPanel({
       const updated = await client.activateAccessConfig(agentId)
       setSaved(updated)
       setDraft(draftFromConfig(updated))
-      onAudienceEffectiveChange?.(updated.audience_effective)
+      onAudienceEffectiveChange?.(agentId, updated.audience_effective)
       setStatus(
         'Group-based access is active. Existing personal grants no longer authorize this agent.',
       )
@@ -329,7 +341,11 @@ export function AccessPanel({
             no longer authorize access to this agent.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" disabled={activating} onClick={() => void activate()}>
+            <Button
+              type="button"
+              disabled={dirty || saving || activating}
+              onClick={() => void activate()}
+            >
               Confirm activation
             </Button>
             <Button

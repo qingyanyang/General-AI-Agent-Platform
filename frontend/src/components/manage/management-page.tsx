@@ -303,7 +303,11 @@ export function ManagementPage({
   const page = useManagement({ client, permissions, onUnauthorized })
   const projectHref = readProjectUrl(projectUrl)
   const detail = page.detail
-  const [audienceEffective, setAudienceEffective] = useState(false)
+  // Agent id for which AccessPanel last reported audience_effective=true.
+  // Scoped to that agent so opening an audience Agent does not hide grants for others.
+  const [audienceEffectiveAgentId, setAudienceEffectiveAgentId] = useState<string | null>(null)
+  const hideLegacyGrants =
+    detail != null && audienceEffectiveAgentId === detail.id
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-8 px-4 py-6">
@@ -373,7 +377,7 @@ export function ManagementPage({
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={() => {
-                  setAudienceEffective(false)
+                  setAudienceEffectiveAgentId(null)
                   void page.openAgent(agent.id, agent)
                 }}
               >
@@ -401,6 +405,7 @@ export function ManagementPage({
               event.preventDefault()
               const data = new FormData(event.currentTarget)
               const id = String(data.get('configuration-agent-id') ?? '')
+              setAudienceEffectiveAgentId(null)
               void page.openAgent(id)
             }}
           >
@@ -488,13 +493,15 @@ export function ManagementPage({
               agentId={detail.id}
               client={client}
               onUnauthorized={onUnauthorized}
-              onAudienceEffectiveChange={setAudienceEffective}
+              onAudienceEffectiveChange={(agentId, effective) => {
+                setAudienceEffectiveAgentId(effective ? agentId : null)
+              }}
             />
           ) : null}
         </section>
       ) : null}
 
-      {page.canManageAccess && !audienceEffective ? (
+      {page.canManageAccess && !hideLegacyGrants ? (
         <section className="space-y-3 rounded-xl border border-border p-4">
           <h2 className="text-sm font-medium">Access grants</h2>
           <p className="text-sm text-muted-foreground">

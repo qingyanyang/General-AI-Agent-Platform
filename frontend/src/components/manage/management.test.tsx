@@ -677,4 +677,127 @@ describe('ManagementPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Assign Ops' })).toBeChecked()
     expect(activateAccessConfig).not.toHaveBeenCalled()
   })
+
+  it('hides legacy grants only for the opened audience-effective agent', async () => {
+    const user = userEvent.setup()
+    const audienceAgent = agent('audience', 'Audience')
+    const legacyAgent = agent('legacy', 'Legacy')
+    renderPage(
+      createClient({
+        listAgents: async () => ({
+          items: [audienceAgent, legacyAgent],
+          next_cursor: null,
+        }),
+        getAgent: async (id) => (id === 'audience' ? audienceAgent : legacyAgent),
+        getAccessConfig: async (id) => ({
+          agent_id: id,
+          authorization_mode: id === 'audience' ? 'audience' : 'legacy_grants',
+          audience_effective: id === 'audience',
+          audience_mode: 'groups',
+          owning_group_id: null,
+          owning_group_name: null,
+          group_ids: [],
+          groups: [],
+          updated_at: '2026-01-01T00:00:00Z',
+        }),
+        listGrants: async () => ({ items: [], next_cursor: null }),
+      }),
+      accessAdmin,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Access grants' })).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: /Audience/ }))
+    await screen.findByRole('heading', { name: 'Who can use this agent?' })
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Access grants' })).not.toBeInTheDocument()
+    })
+
+    await user.click(await screen.findByRole('button', { name: /Legacy/ }))
+    await screen.findByRole('heading', { name: 'Who can use this agent?' })
+    expect(await screen.findByRole('heading', { name: 'Access grants' })).toBeInTheDocument()
+  })
+
+  it('restores legacy grants after a failed open following an audience-effective agent', async () => {
+    const user = userEvent.setup()
+    const audienceAgent = agent('audience', 'Audience')
+    const broken = agent('broken', 'Broken')
+    renderPage(
+      createClient({
+        listAgents: async () => ({
+          items: [audienceAgent, broken],
+          next_cursor: null,
+        }),
+        getAgent: async (id) => (id === 'broken' ? broken : audienceAgent),
+        getConfiguration: async (id) => {
+          if (id === 'broken') {
+            throw new Error('network down')
+          }
+          return configuration()
+        },
+        getAccessConfig: async (id) => ({
+          agent_id: id,
+          authorization_mode: id === 'audience' ? 'audience' : 'legacy_grants',
+          audience_effective: id === 'audience',
+          audience_mode: 'groups',
+          owning_group_id: null,
+          owning_group_name: null,
+          group_ids: [],
+          groups: [],
+          updated_at: '2026-01-01T00:00:00Z',
+        }),
+        listGrants: async () => ({ items: [], next_cursor: null }),
+      }),
+      superAdmin,
+    )
+
+    await user.click(await screen.findByRole('button', { name: /Audience/ }))
+    await screen.findByRole('heading', { name: 'Who can use this agent?' })
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Access grants' })).not.toBeInTheDocument()
+    })
+
+    await user.click(await screen.findByRole('button', { name: /Broken/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load this agent.')
+    expect(await screen.findByRole('heading', { name: 'Access grants' })).toBeInTheDocument()
+  })
+
+  it('closes activate confirmation when the access draft becomes dirty', async () => {
+    const user = userEvent.setup()
+    const alpha = agent('alpha', 'Alpha')
+    const activateAccessConfig = vi.fn(async () => {
+      throw new Error('should not activate')
+    })
+    renderPage(
+      createClient({
+        listAgents: async () => ({ items: [alpha], next_cursor: null }),
+        getAgent: async () => alpha,
+        getAccessConfig: async () => ({
+          agent_id: 'alpha',
+          authorization_mode: 'legacy_grants',
+          audience_effective: false,
+          audience_mode: 'groups',
+          owning_group_id: null,
+          owning_group_name: null,
+          group_ids: [],
+          groups: [],
+          updated_at: '2026-01-01T00:00:00Z',
+        }),
+        activateAccessConfig,
+        listAllGroups: async () => [{ id: 'g1', name: 'Ops', description: null }],
+        listGrants: async () => ({ items: [], next_cursor: null }),
+      }),
+      accessAdmin,
+    )
+
+    await user.click(await screen.findByRole('button', { name: /Alpha/ }))
+    await screen.findByRole('heading', { name: 'Who can use this agent?' })
+    await user.click(screen.getByRole('button', { name: 'Activate group-based access' }))
+    expect(screen.getByRole('button', { name: 'Confirm activation' })).toBeEnabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Assign Ops' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Confirm activation' })).not.toBeInTheDocument()
+    })
+    expect(activateAccessConfig).not.toHaveBeenCalled()
+  })
 })
