@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agents.errors import AgentNotConfiguredError
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.skills import LOAD_SKILL_TOOL_NAME, create_default_skill_registry
 from app.agents.tools import create_default_registry
 from app.core.auth import USER_ID_MAX_LENGTH
@@ -72,6 +73,7 @@ class AgentExecutionConfig:
     tool_names: tuple[str, ...]
     skill_names: tuple[str, ...] = ()
     approval_tool_names: tuple[str, ...] = ()
+    instruction_skills: tuple[PublishedInstructionSkill, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -356,8 +358,12 @@ def update_configuration(
     return agent
 
 
-def snapshot_execution_config(agent: Agent) -> AgentExecutionConfig:
-    """Build an immutable config snapshot from a loaded Agent row."""
+def snapshot_execution_config(
+    agent: Agent,
+    *,
+    instruction_skills: tuple[PublishedInstructionSkill, ...] = (),
+) -> AgentExecutionConfig:
+    """Build an immutable config snapshot from a loaded Agent row + published instructions."""
     tools = tuple(str(name) for name in (agent.tool_names or []))
     skills = tuple(str(name) for name in (agent.skill_names or []))
     approvals = tuple(str(name) for name in (agent.approval_tool_names or []))
@@ -370,6 +376,7 @@ def snapshot_execution_config(agent: Agent) -> AgentExecutionConfig:
         tool_names=tools,
         skill_names=skills,
         approval_tool_names=approvals,
+        instruction_skills=instruction_skills,
     )
 
 

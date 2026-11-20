@@ -26,6 +26,7 @@ from app.agents.messages import (
     normalize_message_views,
 )
 from app.agents.skills import (
+    compose_system_prompt_with_instructions,
     compose_system_prompt_with_skills,
     create_default_skill_registry,
 )
@@ -58,14 +59,18 @@ _CANCELLED_TOOL_CONTENT = "Tool execution cancelled"
 
 
 def _system_prompt_for_run(execution_config: AgentExecutionConfig) -> str:
-    """Ephemeral prompt: base system prompt plus assigned skill name/description catalog."""
+    """Ephemeral prompt: system prompt, published instructions, then curated skill catalog."""
+    with_instructions = compose_system_prompt_with_instructions(
+        execution_config.system_prompt,
+        execution_config.instruction_skills,
+    )
     skill_registry = create_default_skill_registry()
     skills = [
         skill_registry.get(name)
         for name in execution_config.skill_names
         if skill_registry.has(name)
     ]
-    return compose_system_prompt_with_skills(execution_config.system_prompt, skills)
+    return compose_system_prompt_with_skills(with_instructions, skills)
 
 
 def ensure_llm_configured() -> None:

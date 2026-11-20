@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.tool_policy import BUILTIN_TOOL_NAMES, ToolAuthContext
 from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.models.agent import Agent, AgentStatus
@@ -34,6 +35,7 @@ def default_execution_config(
     tool_names: tuple[str, ...] | None = None,
     skill_names: tuple[str, ...] = (),
     approval_tool_names: tuple[str, ...] = (),
+    instruction_skills: tuple[PublishedInstructionSkill, ...] = (),
 ) -> AgentExecutionConfig:
     """Immutable config snapshot for unit tests that call run_agent / stream_agent."""
     tools = tuple(sorted(BUILTIN_TOOL_NAMES)) if tool_names is None else tool_names
@@ -46,6 +48,7 @@ def default_execution_config(
         tool_names=tools,
         skill_names=skill_names,
         approval_tool_names=approval_tool_names,
+        instruction_skills=instruction_skills,
     )
 
 
