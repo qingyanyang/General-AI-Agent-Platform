@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.tool_policy import BUILTIN_TOOL_NAMES, ToolAuthContext
 from app.core.permissions import PERM_AGENTS_EXECUTE
 from app.models.agent import Agent, AgentStatus
 from app.services import agent_access as access_service
-from app.services.agent_instruction_skills import PublishedInstructionSkill
 from app.services.agents import DEFAULT_AGENT_ID, AgentExecutionConfig, ensure_default_agent
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver

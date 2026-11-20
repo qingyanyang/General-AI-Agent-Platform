@@ -18,8 +18,10 @@ class InstructionSkillItemIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(max_length=NAME_MAX_LENGTH)
-    description: str = Field(default="", max_length=DESCRIPTION_MAX_LENGTH)
+    # Length limits for name/description are enforced after strip in validators.
+    # Do not put Field(max_length=...) here — Pydantic applies it to the raw value first.
+    name: str
+    description: str = ""
     instructions: str = Field(max_length=INSTRUCTIONS_MAX_LENGTH)
 
     @field_validator("name")

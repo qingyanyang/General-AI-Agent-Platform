@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.skills.registry import LOAD_SKILL_TOOL_NAME, Skill
-from app.services.agent_instruction_skills import PublishedInstructionSkill
 
 _CATALOG_HEADER = (
     "Available skills (names and descriptions only). "

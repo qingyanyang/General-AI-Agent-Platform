@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agents.errors import AgentNotConfiguredError
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.skills import LOAD_SKILL_TOOL_NAME, create_default_skill_registry
 from app.agents.tools import create_default_registry
 from app.core.auth import USER_ID_MAX_LENGTH
@@ -25,7 +26,6 @@ from app.schemas.agent import AgentStatusFilter
 from app.schemas.agent_config import SYSTEM_PROMPT_MAX_LENGTH
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
 from app.services import agent_access as access_service
-from app.services.agent_instruction_skills import PublishedInstructionSkill
 
 INACTIVE_AGENT_DETAIL = "Agent is inactive"
 DEFAULT_AGENT_ID = "default"

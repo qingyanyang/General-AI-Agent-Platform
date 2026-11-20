@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.agents.instructions import PublishedInstructionSkill
 from app.models.agent import Agent
 from app.models.agent_instruction_skill import AgentInstructionSkill
 from app.schemas.agent_instruction_skills import (
@@ -27,6 +28,16 @@ from app.schemas.agent_instruction_skills import (
 )
 from app.services import agent_access as access_service
 
+__all__ = [
+    "InstructionSkillView",
+    "InstructionSkillsNotFound",
+    "InstructionSkillsValidationError",
+    "PublishedInstructionSkill",
+    "list_instruction_skills",
+    "load_published_instruction_skills",
+    "replace_instruction_skills",
+]
+
 
 class InstructionSkillsNotFound(Exception):
     """Agent is missing."""
@@ -34,15 +45,6 @@ class InstructionSkillsNotFound(Exception):
 
 class InstructionSkillsValidationError(Exception):
     """Payload failed domain validation."""
-
-
-@dataclass(frozen=True, slots=True)
-class PublishedInstructionSkill:
-    """Immutable published instruction used in execution snapshots."""
-
-    name: str
-    description: str
-    instructions: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
+from app.agents.instructions import PublishedInstructionSkill
 from app.agents.runtime import _system_prompt_for_run, run_agent
 from app.agents.skills import compose_system_prompt_with_instructions
 from app.api.deps import get_current_user
@@ -28,7 +29,6 @@ from app.schemas.agent_instruction_skills import (
     InstructionSkillItemIn,
 )
 from app.services import agent_instruction_skills as instruction_service
-from app.services.agent_instruction_skills import PublishedInstructionSkill
 from fastapi import Request
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -442,6 +442,31 @@ def test_unknown_agent_is_404(api_client: TestClient) -> None:
         ).status_code
         == 404
     )
+
+
+def test_name_and_description_trim_before_length_limits(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    seed_agent(db_session, AGENT_ID)
+    # Raw length > 120 due to padding; trimmed length is within the limit.
+    padded_name = f"  {'n' * 119}  "
+    padded_description = f"  {'d' * 50}  "
+    put = _put_instructions(
+        api_client,
+        agent_id=AGENT_ID,
+        items=[
+            {
+                "name": padded_name,
+                "description": padded_description,
+                "instructions": "body",
+            },
+        ],
+    )
+    assert put.status_code == 200, put.text
+    item = put.json()["items"][0]
+    assert item["name"] == "n" * 119
+    assert item["description"] == "d" * 50
 
 
 def test_validation_failures_leave_collection_unchanged(
