@@ -120,11 +120,28 @@ def test_parse_permissions_claim(raw: Any, expected: frozenset[str]) -> None:
 
 
 def test_role_matrix_matches_documented_mapping() -> None:
-    assert ROLE_PERMISSIONS["Admin"] == ALL_PERMISSIONS
-    assert ROLE_PERMISSIONS["Agent Developer"] == frozenset(
-        {PERM_AGENTS_READ, PERM_AGENTS_CONFIGURE, PERM_AGENTS_EXECUTE}
+    from app.core.permissions import (
+        PERM_AGENT_ACCESS_MANAGE,
+        PERM_AGENTS_CONFIGURE,
+        PERM_AGENTS_EXECUTE,
+        PERM_AGENTS_READ,
+        PERM_PLATFORM_TECHNICAL,
     )
-    assert ROLE_PERMISSIONS["Agent User"] == frozenset({PERM_AGENTS_READ, PERM_AGENTS_EXECUTE})
+
+    assert ROLE_PERMISSIONS["Super Admin"] == ALL_PERMISSIONS
+    assert PERM_PLATFORM_TECHNICAL in ROLE_PERMISSIONS["Super Admin"]
+    assert ROLE_PERMISSIONS["Admin"] == frozenset(
+        {
+            PERM_AGENTS_READ,
+            PERM_AGENTS_CONFIGURE,
+            PERM_AGENTS_EXECUTE,
+            PERM_AGENT_ACCESS_MANAGE,
+        }
+    )
+    assert PERM_PLATFORM_TECHNICAL not in ROLE_PERMISSIONS["Admin"]
+    assert ROLE_PERMISSIONS["User"] == frozenset({PERM_AGENTS_READ, PERM_AGENTS_EXECUTE})
+    assert "Agent Developer" not in ROLE_PERMISSIONS
+    assert "Agent User" not in ROLE_PERMISSIONS
 
 
 def test_missing_permissions_claim_is_403(
@@ -197,7 +214,7 @@ def test_agent_user_can_read_and_execute(
     seed_agent_grant(db_session, "auth0|user-1")
     token = _token(
         private_key,
-        permissions=sorted(ROLE_PERMISSIONS["Agent User"]),
+        permissions=sorted(ROLE_PERMISSIONS["User"]),
     )
     headers = bearer_headers(token)
     created = client.post("/sessions", json={"agent_id": "default"}, headers=headers)
@@ -207,11 +224,28 @@ def test_agent_user_can_read_and_execute(
     assert listed.json()["items"][0]["id"] == created.json()["id"]
 
 
-def test_agent_developer_lacks_agent_access_manage() -> None:
+def test_admin_lacks_platform_technical() -> None:
+    async def run() -> None:
+        from app.core.permissions import PERM_PLATFORM_TECHNICAL
+
+        user = AuthenticatedUser(
+            user_id="auth0|admin",
+            permissions=ROLE_PERMISSIONS["Admin"],
+        )
+        check = require_permissions(PERM_PLATFORM_TECHNICAL)
+        with pytest.raises(HTTPException) as exc_info:
+            await check(user=user)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Permission denied"
+
+    asyncio.run(run())
+
+
+def test_user_lacks_agent_access_manage() -> None:
     async def run() -> None:
         user = AuthenticatedUser(
-            user_id="auth0|dev",
-            permissions=ROLE_PERMISSIONS["Agent Developer"],
+            user_id="auth0|user",
+            permissions=ROLE_PERMISSIONS["User"],
         )
         check = require_permissions(PERM_AGENT_ACCESS_MANAGE)
         with pytest.raises(HTTPException) as exc_info:
@@ -274,7 +308,7 @@ def test_configure_permission_unwired_but_enforced() -> None:
     async def run() -> None:
         user = AuthenticatedUser(
             user_id="auth0|user",
-            permissions=ROLE_PERMISSIONS["Agent User"],
+            permissions=ROLE_PERMISSIONS["User"],
         )
         check = require_permissions(PERM_AGENTS_CONFIGURE)
         with pytest.raises(HTTPException) as exc_info:
@@ -309,8 +343,6 @@ def test_agents_run_requires_execute(
     allowed = client.post(
         "/agents/run",
         json={"message": "hello"},
-        headers=bearer_headers(
-            _token(private_key, permissions=sorted(ROLE_PERMISSIONS["Agent User"]))
-        ),
+        headers=bearer_headers(_token(private_key, permissions=sorted(ROLE_PERMISSIONS["User"]))),
     )
     assert allowed.status_code == 200

@@ -1,9 +1,9 @@
-"""Staged agent audience and owning-group configuration (Issue 3).
+"""Agent audience and owning-group access configuration (Issues 3–4).
 
-FastAPI-free. These settings are **not** consulted by Chat, discovery, or
-session authorization while ``authorization_mode`` is ``legacy_grants``.
-Issue 4 activates ``audience`` mode and enforces the audience policy without
-OR-ing legacy grants.
+FastAPI-free. While ``authorization_mode`` is ``legacy_grants``, PUT stores
+configuration for later activation and grants still govern access. After
+activation (``audience``), PUT immediately updates effective access. PUT never
+returns an Agent to ``legacy_grants``.
 
 ``SELECT ... FOR UPDATE`` is used before reading ownership/assignments. SQLite
 tests do **not** verify PostgreSQL row-lock / concurrency behavior; that remains
@@ -147,9 +147,11 @@ def update_access_config(
     owning_group_id: uuid.UUID | None,
     group_ids: list[uuid.UUID],
 ) -> AccessConfigView:
-    """Replace staged audience configuration in one locked transaction.
+    """Replace audience configuration in one locked transaction.
 
-    Does not change ``authorization_mode``. Does not touch grant rows.
+    Does not change ``authorization_mode`` (never switches back to legacy).
+    Does not touch grant rows. When mode is already ``audience``, the saved
+    values are effective on subsequent requests.
     """
     if audience_mode not in {
         AgentAudienceMode.COMPANY.value,
@@ -236,4 +238,28 @@ def update_access_config(
 
     db.commit()
     db.refresh(agent)
+    return _build_view(db, agent)
+
+
+def activate_access_config(db: Session, *, agent_id: str) -> AccessConfigView:
+    """Flip ``authorization_mode`` to ``audience`` using the saved configuration.
+
+    Does not delete grant rows. Idempotent when already audience with a valid
+    saved ``audience_mode``.
+    """
+    agent = _lock_agent(db, agent_id)
+    if agent.audience_mode not in {
+        AgentAudienceMode.COMPANY.value,
+        AgentAudienceMode.GROUPS.value,
+    }:
+        raise AgentAccessConfigValidationError(
+            "Cannot activate: save an audience configuration first "
+            "(audience_mode must be 'company' or 'groups')",
+        )
+
+    if agent.authorization_mode != AgentAuthorizationMode.AUDIENCE.value:
+        agent.authorization_mode = AgentAuthorizationMode.AUDIENCE.value
+        agent.updated_at = _utcnow()
+        db.commit()
+        db.refresh(agent)
     return _build_view(db, agent)

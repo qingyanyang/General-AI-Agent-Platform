@@ -447,10 +447,11 @@ def test_missing_group_and_membership_are_404(
     assert deleted.status_code == 404, deleted.text
 
 
-def test_membership_does_not_change_agent_or_session_authorization(
+def test_membership_does_not_authorize_legacy_default_agent(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
+    """Group membership alone does not authorize legacy_grants Agents."""
     _seed_directory(db_session, ADMIN, MEMBER)
     group_id = _create_group(api_client)
     _put_membership(api_client, group_id, MEMBER, GroupDesignation.MEMBER.value)

@@ -93,6 +93,7 @@ def _ensure_capability(
     user_id: str,
     agent_id: str,
     capability: access_service.AgentCapability,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> None:
     try:
         access_service.ensure_agent_capability(
@@ -100,6 +101,7 @@ def _ensure_capability(
             user_id=user_id,
             agent_id=agent_id,
             capability=capability,
+            permissions=permissions,
         )
     except access_service.AgentAccessDenied as exc:
         raise _deny_agent_access() from exc
@@ -110,6 +112,7 @@ def _ensure_executable_agent(
     *,
     user_id: str,
     agent_id: str,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> Agent:
     """404 missing → 403 no execute → 409 inactive."""
     agent = _require_agent(db, agent_id)
@@ -118,6 +121,7 @@ def _ensure_executable_agent(
         user_id=user_id,
         agent_id=agent_id,
         capability=access_service.AgentCapability.EXECUTE,
+        permissions=permissions,
     )
     if agent.status != AgentStatus.ACTIVE.value:
         raise HTTPException(
@@ -145,7 +149,12 @@ def create_session(
     user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_EXECUTE))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatSessionOut:
-    _ensure_executable_agent(db, user_id=user.user_id, agent_id=body.agent_id)
+    _ensure_executable_agent(
+        db,
+        user_id=user.user_id,
+        agent_id=body.agent_id,
+        permissions=user.permissions,
+    )
     # Create does not need an execution snapshot; only active+execute gates.
     session = session_service.create_session(
         db,
@@ -169,6 +178,7 @@ def list_sessions(
         limit=limit,
         cursor=cursor,
         require_view_grant=True,
+        permissions=user.permissions,
     )
     return ChatSessionListOut(
         items=[ChatSessionOut.model_validate(item) for item in page.items],
@@ -192,6 +202,7 @@ def get_session(
         user_id=user.user_id,
         agent_id=session.agent_id,
         capability=access_service.AgentCapability.VIEW,
+        permissions=user.permissions,
     )
     return ChatSessionOut.model_validate(session)
 
@@ -287,6 +298,7 @@ async def list_messages(
         user_id=user.user_id,
         agent_id=chat_session.agent_id,
         capability=access_service.AgentCapability.VIEW,
+        permissions=user.permissions,
     )
     items = await message_service.load_session_messages(
         checkpointer=checkpointer,
@@ -314,6 +326,7 @@ async def create_message(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
+            permissions=user.permissions,
         )
         owned_session_id = chat_session.id
         agent_id = agent.id
@@ -456,6 +469,7 @@ async def stream_message(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
+            permissions=user.permissions,
         )
         owned_session_id = chat_session.id
         agent_id = agent.id
@@ -613,6 +627,7 @@ async def list_approvals(
         user_id=user.user_id,
         agent_id=chat_session.agent_id,
         capability=access_service.AgentCapability.VIEW,
+        permissions=user.permissions,
     )
     agent = _require_agent(db, chat_session.agent_id)
     execution_config, _tool_auth = execution_bundle(
@@ -682,7 +697,8 @@ async def _decide_approval(
     request: Request,
     user: AuthenticatedUser,
 ) -> ChatMessageCreateResult | JSONResponse:
-    checkpointer = _require_checkpointer(request)
+    # Ownership + Agent EXECUTE before checkpointer so revoked access returns 403
+    # (and does not require persistence) without invoking the model.
     with _db_session(request) as db:
         chat_session = session_service.get_active_session_for_user(
             db,
@@ -693,6 +709,7 @@ async def _decide_approval(
             db,
             user_id=user.user_id,
             agent_id=chat_session.agent_id,
+            permissions=user.permissions,
         )
         gate = _require_awaiting_gate(
             db,
@@ -710,6 +727,7 @@ async def _decide_approval(
             user_id=user.user_id,
             permissions=user.permissions,
         )
+    checkpointer = _require_checkpointer(request)
 
     observed = await read_pending_approval(
         checkpointer=checkpointer,

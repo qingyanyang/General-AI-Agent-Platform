@@ -20,7 +20,7 @@ from app.core.config import (
     ApprovedLlmModel,
     get_settings,
 )
-from app.models.agent import Agent, AgentStatus
+from app.models.agent import Agent, AgentAudienceMode, AgentAuthorizationMode, AgentStatus
 from app.schemas.agent import AgentStatusFilter
 from app.schemas.agent_config import SYSTEM_PROMPT_MAX_LENGTH
 from app.schemas.chat_session import AGENT_ID_MAX_LENGTH
@@ -187,7 +187,12 @@ def create_agent(
     description: str | None,
     created_by: str,
 ) -> Agent:
-    """Create agent and creator grant in one transaction."""
+    """Create an audience-mode agent with an empty selected-group audience.
+
+    Does not create a legacy creator grant. Ordinary users cannot use the agent
+    until access is assigned; administrators with ``agent-access:manage`` can
+    discover and configure it.
+    """
     agent_id = validate_agent_id(agent_id)
     created_by = validate_created_by(created_by)
     if db.get(Agent, agent_id) is not None:
@@ -210,26 +215,16 @@ def create_agent(
         tool_names=list(config_fields["tool_names"]),  # type: ignore[arg-type]
         skill_names=list(config_fields["skill_names"]),  # type: ignore[arg-type]
         approval_tool_names=list(config_fields["approval_tool_names"]),  # type: ignore[arg-type]
+        authorization_mode=AgentAuthorizationMode.AUDIENCE.value,
+        audience_mode=AgentAudienceMode.GROUPS.value,
+        owning_group_id=None,
     )
     db.add(agent)
     try:
-        db.flush()
+        db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise AgentConflictError from exc
-
-    try:
-        access_service.upsert_grant(
-            db,
-            user_id=created_by,
-            agent_id=agent_id,
-            can_view=True,
-            can_configure=True,
-            can_execute=True,
-        )
-    except Exception:
-        db.rollback()
-        raise
     db.refresh(agent)
     return agent
 
@@ -449,13 +444,15 @@ def list_agents_for_user(
     status: AgentStatusFilter,
     limit: int,
     cursor: str | None,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> AgentPage:
-    """List agents the user can view, optionally filtered by status."""
-    viewable = access_service.viewable_agent_ids(db, user_id=user_id)
-    if not viewable:
-        return AgentPage(items=[], next_cursor=None)
+    """List agents the user can view, optionally filtered by status.
 
-    stmt: Select[tuple[Agent]] = select(Agent).where(Agent.id.in_(viewable))
+    View eligibility is applied in SQL before limit/cursor pagination.
+    """
+    stmt: Select[tuple[Agent]] = select(Agent).where(
+        access_service.viewable_agent_id_clause(user_id=user_id, permissions=permissions),
+    )
     if status is AgentStatusFilter.ACTIVE:
         stmt = stmt.where(Agent.status == AgentStatus.ACTIVE.value)
     elif status is AgentStatusFilter.INACTIVE:

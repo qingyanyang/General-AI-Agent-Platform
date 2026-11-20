@@ -451,33 +451,34 @@ def test_existing_agents_remain_legacy_and_chat_grants_unchanged(
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_create_agent_still_writes_creator_grant_and_legacy_mode(
+def test_create_agent_uses_audience_mode_without_creator_grant(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
     created = api_client.post(
         "/agents",
-        json={"id": "new-legacy-agent", "name": "New", "description": None},
+        json={"id": "new-audience-agent", "name": "New", "description": None},
         headers=headers(ADMIN),
     )
     assert created.status_code == 201, created.text
 
     config = api_client.get(
-        "/agents/new-legacy-agent/access-config",
+        "/agents/new-audience-agent/access-config",
         headers=headers(ADMIN),
     )
     assert config.status_code == 200, config.text
-    assert config.json()["authorization_mode"] == "legacy_grants"
-    assert config.json()["audience_effective"] is False
+    assert config.json()["authorization_mode"] == "audience"
+    assert config.json()["audience_mode"] == "groups"
+    assert config.json()["audience_effective"] is True
+    assert config.json()["group_ids"] == []
 
     grant = db_session.scalar(
         select(AgentAccessGrant).where(
-            AgentAccessGrant.agent_id == "new-legacy-agent",
+            AgentAccessGrant.agent_id == "new-audience-agent",
             AgentAccessGrant.user_id == ADMIN,
         ),
     )
-    assert grant is not None
-    assert grant.can_view and grant.can_configure and grant.can_execute
+    assert grant is None
 
 
 def test_unique_agent_group_assignment(

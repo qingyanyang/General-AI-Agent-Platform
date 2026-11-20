@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.api.deps import get_current_user
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
-from app.core.permissions import PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ
+from app.core.permissions import PERM_AGENTS_READ, PERM_PLATFORM_TECHNICAL
 from fastapi import Request
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
@@ -30,7 +30,7 @@ def test_catalog_missing_bearer_is_401(client: TestClient, monkeypatch: MonkeyPa
     assert response.headers.get("www-authenticate") == "Bearer"
 
 
-def test_catalog_without_configure_is_403(client: TestClient) -> None:
+def test_catalog_without_technical_is_403(client: TestClient) -> None:
     client.app.dependency_overrides[get_current_user] = _as_user(PERM_AGENTS_READ)
 
     assert client.get("/tools").status_code == 403
@@ -38,7 +38,7 @@ def test_catalog_without_configure_is_403(client: TestClient) -> None:
 
 
 def test_tools_exclude_load_skill_and_models_include_bounds(client: TestClient) -> None:
-    client.app.dependency_overrides[get_current_user] = _as_user(PERM_AGENTS_CONFIGURE)
+    client.app.dependency_overrides[get_current_user] = _as_user(PERM_PLATFORM_TECHNICAL)
 
     tools = client.get("/tools")
     assert tools.status_code == 200, tools.text

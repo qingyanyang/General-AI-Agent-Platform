@@ -96,6 +96,44 @@ export type AgentPatch = {
   description?: string | null
 }
 
+export type AccessAudienceMode = 'company' | 'groups'
+export type AccessAuthorizationMode = 'legacy_grants' | 'audience'
+
+export type AccessConfigGroup = {
+  group_id: string
+  name: string
+  is_owning: boolean
+}
+
+export type AgentAccessConfig = {
+  agent_id: string
+  authorization_mode: AccessAuthorizationMode
+  audience_effective: boolean
+  audience_mode: AccessAudienceMode | null
+  owning_group_id: string | null
+  owning_group_name: string | null
+  group_ids: string[]
+  groups: AccessConfigGroup[]
+  updated_at: string
+}
+
+export type AgentAccessConfigUpdate = {
+  audience_mode: AccessAudienceMode
+  owning_group_id: string | null
+  group_ids: string[]
+}
+
+export type GroupRecord = {
+  id: string
+  name: string
+  description: string | null
+}
+
+export type GroupPage = {
+  items: GroupRecord[]
+  next_cursor: string | null
+}
+
 export interface ManagementClient {
   listAgents(cursor?: string): Promise<AgentPage>
   getAgent(id: string): Promise<AgentRecord>
@@ -108,6 +146,11 @@ export interface ManagementClient {
     body: AgentConfiguration,
     signal?: AbortSignal,
   ): Promise<AgentConfiguration>
+  getAccessConfig(id: string): Promise<AgentAccessConfig>
+  putAccessConfig(id: string, body: AgentAccessConfigUpdate): Promise<AgentAccessConfig>
+  activateAccessConfig(id: string): Promise<AgentAccessConfig>
+  listGroups(cursor?: string): Promise<GroupPage>
+  listAllGroups(): Promise<GroupRecord[]>
   listTools(): Promise<ToolCatalogItem[]>
   listModels(): Promise<LlmModel[]>
   listSkills(): Promise<SkillSummary[]>
@@ -299,6 +342,74 @@ function parseExecutionPage(value: unknown): ExecutionPage {
   }
 }
 
+function parseAccessConfigGroup(value: unknown): AccessConfigGroup {
+  if (
+    !isRecord(value) ||
+    typeof value.group_id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.is_owning !== 'boolean'
+  ) {
+    throw unexpectedResponse()
+  }
+  return {
+    group_id: value.group_id,
+    name: value.name,
+    is_owning: value.is_owning,
+  }
+}
+
+function parseAccessConfig(value: unknown): AgentAccessConfig {
+  if (
+    !isRecord(value) ||
+    typeof value.agent_id !== 'string' ||
+    (value.authorization_mode !== 'legacy_grants' && value.authorization_mode !== 'audience') ||
+    typeof value.audience_effective !== 'boolean' ||
+    !(value.audience_mode === 'company' || value.audience_mode === 'groups' || value.audience_mode === null) ||
+    !(typeof value.owning_group_id === 'string' || value.owning_group_id === null) ||
+    !(typeof value.owning_group_name === 'string' || value.owning_group_name === null) ||
+    !Array.isArray(value.group_ids) ||
+    value.group_ids.some((item) => typeof item !== 'string') ||
+    !Array.isArray(value.groups) ||
+    typeof value.updated_at !== 'string'
+  ) {
+    throw unexpectedResponse()
+  }
+  return {
+    agent_id: value.agent_id,
+    authorization_mode: value.authorization_mode,
+    audience_effective: value.audience_effective,
+    audience_mode: value.audience_mode,
+    owning_group_id: value.owning_group_id,
+    owning_group_name: value.owning_group_name,
+    group_ids: value.group_ids,
+    groups: value.groups.map(parseAccessConfigGroup),
+    updated_at: value.updated_at,
+  }
+}
+
+function parseGroup(value: unknown): GroupRecord {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.name !== 'string' ||
+    !(typeof value.description === 'string' || value.description === null)
+  ) {
+    throw unexpectedResponse()
+  }
+  return {
+    id: value.id,
+    name: value.name,
+    description: value.description,
+  }
+}
+
+function parseGroupPage(value: unknown): GroupPage {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw unexpectedResponse()
+  }
+  return { items: value.items.map(parseGroup), next_cursor: parseCursor(value.next_cursor) }
+}
+
 async function readJson(response: Response): Promise<unknown> {
   if (!response.ok) {
     throw await apiErrorFromResponse(response)
@@ -372,6 +483,40 @@ export function createManagementClient(
         signal,
       })
       return parseConfiguration(await readJson(response))
+    },
+    async getAccessConfig(id) {
+      const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}/access-config`)
+      return parseAccessConfig(await readJson(response))
+    },
+    async putAccessConfig(id, body) {
+      const response = await authorizedFetch(`/agents/${encodeURIComponent(id)}/access-config`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      })
+      return parseAccessConfig(await readJson(response))
+    },
+    async activateAccessConfig(id) {
+      const response = await authorizedFetch(
+        `/agents/${encodeURIComponent(id)}/access-config/activate`,
+        { method: 'POST', body: '{}' },
+      )
+      return parseAccessConfig(await readJson(response))
+    },
+    async listGroups(cursor) {
+      const response = await authorizedFetch(`/groups?${pageQuery(cursor)}`)
+      return parseGroupPage(await readJson(response))
+    },
+    async listAllGroups() {
+      const items: GroupRecord[] = []
+      let cursor: string | undefined
+      for (;;) {
+        const page = await this.listGroups(cursor)
+        items.push(...page.items)
+        if (!page.next_cursor) {
+          return items
+        }
+        cursor = page.next_cursor
+      }
     },
     async listTools() {
       const response = await authorizedFetch('/tools')

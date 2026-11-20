@@ -80,18 +80,21 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 
 | Permission | Meaning |
 | --- | --- |
-| `agents:read` | List/get agents (with view grant), sessions, and message history |
+| `agents:read` | List/get agents (with view/audience eligibility), sessions, and message history |
 | `agents:execute` | Create/archive sessions, post/stream messages, `POST /agents/run` |
-| `agents:configure` | Create/update/deactivate agents (#19); creator auto-receives view+configure+execute on new agents |
-| `agent-access:manage` | Grant / inspect / revoke per-user agent access (#17) |
+| `agents:configure` | Create (with manage) / update metadata / deactivate agents |
+| `agent-access:manage` | Business access admin: grants, access-config, activate; audience-mode Agent scope |
+| `platform:technical` | Technical configuration and protected catalogs (prompt, tools, models, skill detail) |
 
 | Role | Permissions |
 | --- | --- |
-| Admin | all four |
-| Agent Developer | `agents:read`, `agents:configure`, `agents:execute` |
-| Agent User | `agents:read`, `agents:execute` |
+| Super Admin | all five, including `platform:technical` |
+| Admin | `agents:read`, `agents:execute`, `agents:configure`, `agent-access:manage` — **never** `platform:technical` |
+| User | `agents:read`, `agents:execute` |
 
-Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership or per-agent grants. **Admin has no implicit view/configure/execute** on agents — `agent-access:manage` only authorizes grant APIs.
+Do **not** treat Agent Developer as a target role. Group leadership does **not** grant `platform:technical`. Existing Auth0 roles may remain during migration; do **not** grant technical permission to Admin (or legacy Agent Developer) as a compatibility shortcut.
+
+Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership. Modes are never OR'd: legacy grants authorize only `legacy_grants` Agents; audience membership authorizes only `audience` Agents. `agent-access:manage` provides administrator-wide Agent scope for audience-mode Agents but never cross-user session access.
 
 ### Agent catalog (#19)
 
@@ -99,15 +102,18 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| `POST` | `/agents` | `agents:configure` — creates agent + creator grant (`view`+`configure`+`execute`) in one transaction; config defaults: empty prompt, catalog default LLM, `tool_names=[]`, `skill_names=[]` |
-| `GET` | `/agents` | `agents:read` — lists agents the caller can **view** (`status=active\|inactive\|all`, default `active`) |
-| `GET` | `/agents/{agent_id}` | `agents:read` + view grant; **missing view → 404** (catalog non-disclosure; distinct from session-scoped **403**) |
-| `PATCH` | `/agents/{agent_id}` | `agents:configure` + configure grant — `name` / `description` only (`id` immutable; omit vs `null` for description) |
-| `GET` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — system prompt, LLM, temperature, tool and skill assignments |
-| `PUT` | `/agents/{agent_id}/configuration` | `agents:configure` + configure grant — full replace (row-locked); adding tools requires each tool's `required_permissions`; `load_skill` cannot be assigned in `tool_names` |
-| `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + configure grant — soft-deactivate (idempotent) |
+| `POST` | `/agents` | `agents:configure` **and** `agent-access:manage` — audience mode + empty selected groups; **no** creator grant |
+| `GET` | `/agents` | `agents:read` — lists agents the caller can **view** (SQL filter before pagination; `status=active\|inactive\|all`, default `active`) |
+| `GET` | `/agents/{agent_id}` | `agents:read` + VIEW scope; **missing → 404** (catalog non-disclosure; distinct from session-scoped **403**) |
+| `PATCH` | `/agents/{agent_id}` | `agents:configure` + CONFIGURE scope — `name` / `description` only |
+| `GET`/`PUT` | `/agents/{agent_id}/access-config` | `agent-access:manage` — audience/owning-group configuration |
+| `POST` | `/agents/{agent_id}/access-config/activate` | `agent-access:manage` — sets `authorization_mode=audience` from saved config; does not delete grants |
+| `GET` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — system prompt, LLM, temperature, tool and skill assignments |
+| `PUT` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — full replace (row-locked) |
+| `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + CONFIGURE scope — soft-deactivate (idempotent) |
+| `GET` | `/tools`, `/llm-models` | `platform:technical` |
 | `GET` | `/skills` | `agents:read` — curated skill catalog (**name + description only**) |
-| `GET` | `/skills/{name}` | `agents:configure` — full instructions + descriptive resource refs (operators may inspect all curated skills; assignment gates **runtime loading**, not operator access) |
+| `GET` | `/skills/{name}` | `platform:technical` — full instructions + descriptive resource refs |
 
 **Deactivation** blocks **all new executions** with **409** `Agent is inactive` (before the model runs): new sessions, existing-session JSON/SSE, and session-scoped or stateless `/agents/run`. Existing history remains readable under ownership + view grants.
 
@@ -115,7 +121,7 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 
 Persisted per agent: `system_prompt` (exact max **20 000** characters; whitespace preserved), `llm_provider` / `llm_model` (must be in `APPROVED_LLM_MODELS`), `temperature` (required when the approved entry supports it; must be `null` when it does not), `tool_names` (registered tools only; **empty means no tools**, never all tools), and `skill_names` (curated skills only; **empty means no skills**, never all skills).
 
-- **GET/PUT** `/agents/{id}/configuration` require both the `agents:configure` permission and a configure grant (same dual authz as catalog mutate). Prompt, tool, and skill lists are not returned on `AgentOut` list/get.
+- **GET/PUT** `/agents/{id}/configuration` require `platform:technical` plus mode-specific CONFIGURE scope (legacy: configure grant; audience: `agent-access:manage`). Configure grants alone never bypass `platform:technical`. Prompt, tool, and skill lists are not returned on `AgentOut` list/get.
 - **Disclosure caveat:** configure-gated GET protects the stored prompt from users without configure access, but a model may still echo or paraphrase prompt content in replies visible to executors.
 - **Execution snapshot:** before a run (including before SSE headers), the API loads the agent once, builds an immutable `AgentExecutionConfig`, validates it (approved LLM, temperature, registered tools and skills, API key), then closes the DB session. Mid-run config edits do not affect that turn. Invalid config → **503** (JSON, not a started stream).
 - **System prompt** is prepended as an ephemeral `SystemMessage` on each model call only — it is not written into checkpoint history. Assigned skill **names and descriptions** are appended to that ephemeral catalog; full skill instructions are not.
@@ -152,16 +158,18 @@ In addition to platform permissions, callers need a per-user grant for the speci
 
 Revocation applies to subsequent requests only (cancelling in-flight runs is out of scope). Stateless `/agents/run` authorizes against `AGENT_ID` / `settings.agent_id` (default `default`).
 
-#### Auth0 Dashboard setup
+#### Auth0 Dashboard setup (manual; Issue 4)
+
+Do **not** change Auth0 from automation. Operators must:
 
 1. On **EAP API**, enable **RBAC** and **Add Permissions in the Access Token**.
-2. Create the four permissions above (names must match exactly).
-3. Create roles **Admin**, **Agent Developer**, and **Agent User** with the matrix.
-4. Assign a role to the user in the Dashboard (no Management API in this milestone).
-5. **Manual check:** after assigning a role, obtain a **new** PKCE access token and call a protected route. Mocked tokens cannot prove Dashboard wiring.
+2. Create permissions exactly: `agents:read`, `agents:execute`, `agents:configure`, `agent-access:manage`, **`platform:technical`**.
+3. Align roles to the target matrix: **Super Admin** (all five), **Admin** (business four, no technical), **User** (read+execute). Do not keep Agent Developer as a target role; do not add `platform:technical` to Admin.
+4. Assign roles in the Dashboard. Users must **refresh tokens** (re-login / new PKCE token) after permission changes — existing tokens keep the old claim set.
+5. **Manual check:** after assigning Super Admin, obtain a **new** access token and call `GET /agents/{id}/configuration` (expect 200 with technical). With Admin-only tokens, expect **403** on technical routes.
 
 ```bash
-# After assigning Agent User and getting a fresh access token:
+# After assigning User and getting a fresh access token:
 curl -s http://localhost:8000/sessions \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'content-type: application/json' \

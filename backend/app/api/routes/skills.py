@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.agents.skills import create_default_skill_registry
 from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
-from app.core.permissions import PERM_AGENTS_CONFIGURE, PERM_AGENTS_READ
+from app.core.permissions import PERM_AGENTS_READ, PERM_PLATFORM_TECHNICAL
 from app.schemas.skill import (
     SkillDetailOut,
     SkillListOut,
@@ -37,7 +37,7 @@ def get_skill(
     skill_name: str,
     _user: Annotated[
         AuthenticatedUser,
-        Depends(require_permissions(PERM_AGENTS_CONFIGURE)),
+        Depends(require_permissions(PERM_PLATFORM_TECHNICAL)),
     ],
 ) -> SkillDetailOut:
     """Operator detail for one curated skill. Assignment still gates runtime load."""

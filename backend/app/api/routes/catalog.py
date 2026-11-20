@@ -11,7 +11,7 @@ from app.agents.tools import create_default_registry
 from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
-from app.core.permissions import PERM_AGENTS_CONFIGURE
+from app.core.permissions import PERM_PLATFORM_TECHNICAL
 from app.schemas.catalog import LlmModelListOut, LlmModelOut, ToolCatalogItem, ToolCatalogOut
 
 router = APIRouter(tags=["catalog"])
@@ -19,7 +19,7 @@ router = APIRouter(tags=["catalog"])
 
 @router.get("/tools", response_model=ToolCatalogOut)
 def list_tools(
-    _user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    _user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_PLATFORM_TECHNICAL))],
 ) -> ToolCatalogOut:
     """Registered tools a caller may assign. ``load_skill`` stays reserved."""
     items = [
@@ -33,7 +33,7 @@ def list_tools(
 
 @router.get("/llm-models", response_model=LlmModelListOut)
 def list_llm_models(
-    _user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENTS_CONFIGURE))],
+    _user: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_PLATFORM_TECHNICAL))],
 ) -> LlmModelListOut:
     """Approved models and their temperature bounds, from server settings."""
     items = [

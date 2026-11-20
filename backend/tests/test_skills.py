@@ -189,23 +189,25 @@ def test_list_skills_requires_read_returns_summaries_only(
         assert set(item.keys()) == {"name", "description"}
 
 
-def test_get_skill_detail_requires_configure(api_client: TestClient) -> None:
+def test_get_skill_detail_requires_platform_technical(api_client: TestClient) -> None:
+    from app.core.permissions import PERM_PLATFORM_TECHNICAL
+
     def reader(request: Request) -> AuthenticatedUser:
         return AuthenticatedUser(
             user_id=request.headers.get("x-user-id", USER),
-            permissions=frozenset({PERM_AGENTS_READ, PERM_AGENTS_EXECUTE}),
+            permissions=frozenset({PERM_AGENTS_READ, PERM_AGENTS_EXECUTE, PERM_AGENTS_CONFIGURE}),
         )
 
     api_client.app.dependency_overrides[get_current_user] = reader
     assert api_client.get("/skills/summarize_brief", headers=headers()).status_code == 403
 
-    def configurator(request: Request) -> AuthenticatedUser:
+    def technical(request: Request) -> AuthenticatedUser:
         return AuthenticatedUser(
             user_id=request.headers.get("x-user-id", USER),
-            permissions=frozenset({PERM_AGENTS_CONFIGURE}),
+            permissions=frozenset({PERM_PLATFORM_TECHNICAL}),
         )
 
-    api_client.app.dependency_overrides[get_current_user] = configurator
+    api_client.app.dependency_overrides[get_current_user] = technical
     response = api_client.get("/skills/summarize_brief", headers=headers())
     assert response.status_code == 200, response.text
     body = response.json()
