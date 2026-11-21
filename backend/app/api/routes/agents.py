@@ -23,6 +23,7 @@ from app.api.execution_records import (
     FAILED,
     SUCCEEDED,
     begin_gated_run_or_http,
+    capture_execution_usage,
     finalize_execution_best_effort,
     pause_for_approval_bounded,
     start_execution_or_503,
@@ -364,14 +365,18 @@ async def agents_run(
     )
     paused: PendingApproval | None = None
     try:
-        result = await run_agent(
-            body.message,
-            tool_auth=tool_auth,
-            execution_config=execution_config,
-            checkpointer=checkpointer,
-            thread_id=thread_id,
-            execution_id=execution_id,
-        )
+        async with capture_execution_usage(
+            request, execution_id, provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+        ):
+            result = await run_agent(
+                body.message,
+                tool_auth=tool_auth,
+                execution_config=execution_config,
+                checkpointer=checkpointer,
+                thread_id=thread_id,
+                execution_id=execution_id,
+            )
         if result.pending is not None:
             paused = result.pending
         else:

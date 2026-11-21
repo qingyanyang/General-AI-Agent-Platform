@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import create_engine, inspect, text
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _FAKE_DATABASE_URL = "postgresql+psycopg://user:pass@localhost/eap"
@@ -31,11 +35,46 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_alembic_has_single_head_at_knowledge_references() -> None:
+def test_alembic_has_single_head_at_execution_usage() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261121_0014", "(head)"]
+    assert result.stdout.split() == ["20261121_0015", "(head)"]
 
+
+def test_usage_migration_creates_observation_tables_without_backfill() -> None:
+    result = _run("-m", "alembic", "upgrade", "20261121_0014:20261121_0015", "--sql")
+    assert result.returncode == 0, result.stderr
+    assert "ADD COLUMN usage_capture VARCHAR(16)" in result.stdout
+    assert "CREATE TABLE agent_platform.execution_model_calls" in result.stdout
+    assert "CREATE TABLE agent_platform.execution_tool_calls" in result.stdout
+    assert "estimated_cost NUMERIC(38, 18)" in result.stdout
+    assert "UPDATE agent_platform.agent_executions" not in result.stdout
+
+
+def test_usage_migration_round_trips_on_disposable_database() -> None:
+    migration = runpy.run_path(str(
+        _BACKEND / "alembic/versions/20261121_0015_execution_usage.py",
+    ))
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("ATTACH DATABASE ':memory:' AS agent_platform"))
+        connection.execute(
+            text("CREATE TABLE agent_platform.agent_executions (id UUID PRIMARY KEY)"),
+        )
+        connection.execute(text("INSERT INTO agent_platform.agent_executions VALUES ('old-run')"))
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            migration["upgrade"]()
+            assert connection.execute(
+                text("SELECT usage_capture FROM agent_platform.agent_executions"),
+            ).one() == (None,)
+            assert "execution_model_calls" in inspect(connection).get_table_names("agent_platform")
+            migration["downgrade"]()
+        assert inspect(connection).get_table_names("agent_platform") == ["agent_executions"]
+        assert connection.execute(
+            text("SELECT id FROM agent_platform.agent_executions"),
+        ).scalar_one() == "old-run"
+    engine.dispose()
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:
     result = _run("-m", "alembic", "upgrade", "20261111_0006:20261112_0007", "--sql")

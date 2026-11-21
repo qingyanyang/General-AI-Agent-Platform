@@ -27,6 +27,7 @@ from app.api.execution_records import (
     FAILED,
     SUCCEEDED,
     begin_gated_run_or_http,
+    capture_execution_usage,
     finalize_execution_best_effort,
     pause_for_approval_bounded,
     resume_gated_run_or_http,
@@ -357,14 +358,18 @@ async def create_message(
     )
     paused: PendingApproval | None = None
     try:
-        result = await message_service.post_user_message(
-            content=body.content,
-            checkpointer=checkpointer,
-            session_id=owned_session_id,
-            tool_auth=tool_auth,
-            execution_config=execution_config,
-            execution_id=execution_uuid,
-        )
+        async with capture_execution_usage(
+            request, execution_uuid, provider=execution_config.llm_provider,
+            model=execution_config.llm_model,
+        ):
+            result = await message_service.post_user_message(
+                content=body.content,
+                checkpointer=checkpointer,
+                session_id=owned_session_id,
+                tool_auth=tool_auth,
+                execution_config=execution_config,
+                execution_id=execution_uuid,
+            )
         if result.pending is not None:
             paused = result.pending
         else:
@@ -504,16 +509,20 @@ async def stream_message(
 
         async def _produce() -> None:
             try:
-                async for event in message_service.stream_user_message(
-                    content=body.content,
-                    checkpointer=checkpointer,
-                    session_id=owned_session_id,
-                    tool_auth=tool_auth,
-                    execution_config=execution_config,
-                    outcome=outcome,
-                    execution_id=execution_uuid,
+                async with capture_execution_usage(
+                    request, execution_uuid, provider=execution_config.llm_provider,
+                    model=execution_config.llm_model,
                 ):
-                    queue.put_nowait(event)
+                    async for event in message_service.stream_user_message(
+                        content=body.content,
+                        checkpointer=checkpointer,
+                        session_id=owned_session_id,
+                        tool_auth=tool_auth,
+                        execution_config=execution_config,
+                        outcome=outcome,
+                        execution_id=execution_uuid,
+                    ):
+                        queue.put_nowait(event)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 — map setup failures before stream_agent's try
@@ -766,14 +775,18 @@ async def _decide_approval(
     )
     paused: PendingApproval | None = None
     try:
-        result = await resume_agent(
-            decision,
-            tool_auth=tool_auth,
-            execution_config=execution_config,
-            checkpointer=checkpointer,
-            thread_id=thread_id_for_session(owned_session_id),
-            execution_id=execution_id,
-        )
+        async with capture_execution_usage(
+            request, execution_id, provider=execution_config.llm_provider,
+            model=execution_config.llm_model, resumed=True,
+        ):
+            result = await resume_agent(
+                decision,
+                tool_auth=tool_auth,
+                execution_config=execution_config,
+                checkpointer=checkpointer,
+                thread_id=thread_id_for_session(owned_session_id),
+                execution_id=execution_id,
+            )
         if result.pending is not None:
             paused = result.pending
         else:

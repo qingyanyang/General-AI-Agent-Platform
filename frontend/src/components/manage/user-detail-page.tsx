@@ -1,5 +1,5 @@
 import { Activity, ArrowLeft, KeyRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { PageFrame } from '@/components/shell/app-shell'
@@ -7,22 +7,22 @@ import { useAppShell } from '@/components/shell/use-app-shell'
 import { Button } from '@/components/ui/button'
 import { Badge, CopyText, EmptyState, LoadingRows, Notice, TextField } from '@/components/ui/primitives'
 import { isApiError } from '@/lib/errors'
+import { displayExecutionStatus, EXECUTION_STATUSES } from '@/lib/execution-status'
 import type {
   DirectoryRole,
   DirectoryUserDetail,
   EffectiveAccess,
-  ExecutionRecord,
+  EstimatedModelCost,
+  RunTokens,
+  RunUsage,
+  RunUsageDetail,
   ExecutionSummary,
 } from '@/lib/management'
 import { AGENT_ACCESS_MANAGE } from '@/lib/permissions'
 import {
   readCachedUserAccess,
-  readCachedUserUsage,
   userAccessEpoch,
-  userUsageCacheKey,
-  userUsageEpoch,
   writeCachedUserAccess,
-  writeCachedUserUsage,
 } from '@/lib/read-cache'
 import { USERS_PATH, groupPath, settingsPath, userPath } from '@/lib/routes'
 import { cn } from '@/lib/utils'
@@ -71,6 +71,8 @@ export function UserDetailPage() {
     }
     let cancelled = false
     setLoading(true)
+    setUser(null)
+    setError(null)
     void managementClient.getUser(decoded).then(
       (next) => {
         if (cancelled) {
@@ -106,7 +108,7 @@ export function UserDetailPage() {
     )
   }
 
-  if (loading) {
+  if (loading || (user && user.user_id !== decoded)) {
     return (
       <PageFrame mobileTitle="User">
         <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
@@ -236,7 +238,11 @@ export function UserDetailPage() {
         </div>
       </header>
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-8">
-        {active === 'access' ? <UserAccessSection userId={user.user_id} /> : <UserUsageSection userId={user.user_id} />}
+        {active === 'access' ? (
+          <UserAccessSection userId={user.user_id} />
+        ) : (
+          <UserUsageSection key={user.user_id} user={user} />
+        )}
       </div>
     </PageFrame>
   )
@@ -347,75 +353,247 @@ function UserAccessSection({ userId }: { userId: string }) {
   )
 }
 
-const USAGE_STATUSES = ['', 'succeeded', 'failed', 'cancelled', 'running', 'awaiting_approval'] as const
+function formatDuration(value: number | null) {
+  if (value === null) {
+    return '—'
+  }
+  return value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value} ms`
+}
 
-function UserUsageSection({ userId }: { userId: string }) {
+function TokenTotals({ tokens }: { tokens: RunTokens }) {
+  if (tokens.completeness === 'not_captured') {
+    return <span className="text-muted-foreground">Usage not captured</span>
+  }
+  if (tokens.completeness === 'unknown') {
+    return <span className="text-muted-foreground">Unknown</span>
+  }
+  return (
+    <div className="grid grid-cols-3 gap-x-3 tabular-nums">
+      {([
+        ['Input', tokens.input_tokens], ['Output', tokens.output_tokens], ['Total', tokens.total_tokens],
+      ] as const).map(([label, count]) => (
+        <div key={label}>
+          <div className="text-xs text-muted-foreground">{label}</div>
+          {count === null ? 'Unknown' : count.toLocaleString()}
+        </div>
+      ))}
+      {tokens.completeness === 'partial' ? (
+        <span className="col-span-3 text-xs text-muted-foreground">Partial · known tokens</span>
+      ) : null}
+    </div>
+  )
+}
+
+function ModelCosts({ cost }: { cost: EstimatedModelCost }) {
+  if (cost.completeness === 'not_captured') {
+    return <span className="text-muted-foreground">Usage not captured</span>
+  }
+  if (cost.completeness === 'unknown') {
+    return <span className="text-muted-foreground">Unknown</span>
+  }
+  return (
+    <div className="tabular-nums">
+      {cost.totals.map(({ currency, amount }) => (
+        <div key={currency} className="whitespace-nowrap">
+          {currency} {amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount}
+        </div>
+      ))}
+      {cost.completeness === 'partial' ? (
+        <span className="text-xs text-muted-foreground">Partial · known costs</span>
+      ) : null}
+    </div>
+  )
+}
+
+function UsageRunDetail({ run }: { run: RunUsageDetail }) {
+  return (
+    <div className="space-y-5">
+      <dl className="grid gap-4 rounded-xl bg-muted p-4 md:grid-cols-3">
+        <div>
+          <dt className="mb-1 text-xs font-medium text-muted-foreground">Execution ID</dt>
+          <dd><CopyText value={run.id} label="execution ID" /></dd>
+        </div>
+        <div>
+          <dt className="mb-1 text-xs font-medium text-muted-foreground">Run tokens</dt>
+          <dd><TokenTotals tokens={run.tokens} /></dd>
+        </div>
+        <div>
+          <dt className="mb-1 text-xs font-medium text-muted-foreground">Estimated model cost</dt>
+          <dd><ModelCosts cost={run.estimated_model_cost} /></dd>
+        </div>
+      </dl>
+      <section className="space-y-2">
+        <h4 className="font-medium">Model calls</h4>
+        {run.model_calls.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No model calls recorded.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {run.model_calls.map((call) => (
+              <li key={call.id} className="grid gap-3 px-4 py-3 text-sm md:grid-cols-3">
+                <div className="min-w-0 break-words">
+                  <p className="font-medium">{call.reported_model ?? call.requested_model}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {call.provider} · {displayExecutionStatus(call.status)} · {formatDuration(call.duration_ms)}
+                  </p>
+                </div>
+                <div>
+                  <TokenTotals tokens={call.tokens} />
+                  {call.cached_input_tokens !== null ? (
+                    <p className="text-xs text-muted-foreground">
+                      Cached input {call.cached_input_tokens.toLocaleString()}
+                    </p>
+                  ) : null}
+                  {call.cache_write_tokens !== null ? (
+                    <p className="text-xs text-muted-foreground">
+                      Cache writes {call.cache_write_tokens.toLocaleString()}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Estimated model cost</p>
+                  <ModelCosts cost={call.estimated_model_cost} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="space-y-2">
+        <h4 className="font-medium">Tool calls</h4>
+        {run.tool_calls.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No tool calls recorded.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {run.tool_calls.map((call) => (
+              <li key={call.id} className="flex flex-wrap justify-between gap-2 px-4 py-3 text-sm">
+                <span className="font-medium">{call.name}</span>
+                <span className="text-muted-foreground">
+                  {displayExecutionStatus(call.status)} · {formatDuration(call.duration_ms)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function UserUsageSection({ user }: { user: DirectoryUserDetail }) {
   const { managementClient, onUnauthorized } = useAppShell()
+  const userId = user.user_id
+  const userLabel = user.display_name || user.email || userId
   const [agentId, setAgentId] = useState('')
   const [status, setStatus] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [applied, setApplied] = useState({ agentId: '', status: '', from: '', to: '' })
-  const initialUsage = readCachedUserUsage(userUsageCacheKey(userId, applied))
-  const [items, setItems] = useState<ExecutionRecord[]>(initialUsage?.items ?? [])
-  const [summary, setSummary] = useState<ExecutionSummary | null>(initialUsage?.summary ?? null)
-  const [loading, setLoading] = useState(initialUsage === null)
+  const [items, setItems] = useState<RunUsage[]>([])
+  const [summary, setSummary] = useState<ExecutionSummary | null>(null)
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selection, setSelection] = useState<string | null>(null)
+  const [detail, setDetail] = useState<RunUsageDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const generation = useRef(0)
+  const detailSection = useRef<HTMLElement>(null)
+  const detailId = useId()
 
   useEffect(() => {
-    const key = userUsageCacheKey(userId, applied)
-    const cached = readCachedUserUsage(key)
-    if (cached) {
-      setItems(cached.items)
-      setSummary(cached.summary)
-      setLoading(false)
-      setError(null)
-      return
-    }
-    const epoch = userUsageEpoch()
-    let cancelled = false
+    const ticket = ++generation.current
     setItems([])
     setSummary(null)
+    setCursor(null)
     setLoading(true)
+    setLoadingMore(false)
     setError(null)
-    void managementClient
-      .listUserExecutions(userId, {
-        agentId: applied.agentId || undefined,
-        status: applied.status || undefined,
-        from: applied.from || undefined,
-        to: applied.to || undefined,
-      })
-      .then(
-        (page) => {
-          if (cancelled || epoch !== userUsageEpoch()) {
-            return
-          }
-          writeCachedUserUsage(key, { items: page.items, summary: page.summary })
+    setSelection(null)
+    void managementClient.listUserExecutions(userId, applied).then(
+      (page) => {
+        if (ticket === generation.current) {
           setItems(page.items)
           setSummary(page.summary)
+          setCursor(page.next_cursor)
           setLoading(false)
-        },
-        (caught: unknown) => {
-          if (cancelled) {
-            return
-          }
-          if (isApiError(caught) && caught.status === 401) {
-            onUnauthorized()
-            return
-          }
+        }
+      },
+      (caught: unknown) => {
+        if (ticket !== generation.current) {
+          return
+        }
+        if (isApiError(caught) && caught.status === 401) {
+          onUnauthorized()
+        } else {
           setError(isApiError(caught) ? caught.message : 'Could not load usage.')
-          setLoading(false)
-        },
-      )
-    return () => {
-      cancelled = true
-    }
+        }
+        setLoading(false)
+      },
+    )
+    return () => { generation.current += 1 }
   }, [applied, managementClient, onUnauthorized, userId])
+
+  async function loadMore() {
+    if (!cursor || loading || loadingMore) {
+      return
+    }
+    const ticket = generation.current
+    setLoadingMore(true)
+    setError(null)
+    try {
+      const page = await managementClient.listUserExecutions(userId, { ...applied, cursor })
+      if (ticket === generation.current) {
+        setItems((current) => [...current, ...page.items])
+        setSummary(page.summary)
+        setCursor(page.next_cursor)
+      }
+    } catch (caught) {
+      if (ticket !== generation.current) {
+        return
+      }
+      if (isApiError(caught) && caught.status === 401) {
+        onUnauthorized()
+      } else {
+        setError(isApiError(caught) ? caught.message : 'Could not load more executions.')
+      }
+    } finally {
+      if (ticket === generation.current) {
+        setLoadingMore(false)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!selection) {
+      return
+    }
+    detailSection.current?.scrollIntoView?.({ block: 'nearest' })
+    let cancelled = false
+    void managementClient.getUserExecutionUsage(userId, selection).then(
+      (next) => {
+        if (!cancelled) {
+          setDetail(next)
+        }
+      },
+      (caught: unknown) => {
+        if (cancelled) {
+          return
+        }
+        if (isApiError(caught) && caught.status === 401) {
+          onUnauthorized()
+        } else {
+          setDetailError(isApiError(caught) ? caught.message : 'Could not load execution details.')
+        }
+      },
+    )
+    return () => { cancelled = true }
+  }, [managementClient, onUnauthorized, selection, userId])
 
   return (
     <div className="space-y-4">
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Execution metadata only. Conversation messages, prompts, and tool payloads are never returned.
+        Estimated model cost covers captured provider usage. Provider invoices are authoritative.
       </p>
       <form
         className="grid gap-3 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4"
@@ -425,7 +603,7 @@ function UserUsageSection({ userId }: { userId: string }) {
             agentId: agentId.trim(),
             status,
             from: from ? new Date(`${from}T00:00:00`).toISOString() : '',
-            to: to ? new Date(`${to}T23:59:59`).toISOString() : '',
+            to: to ? new Date(`${to}T23:59:59.999`).toISOString() : '',
           })
         }}
       >
@@ -435,7 +613,6 @@ function UserUsageSection({ userId }: { userId: string }) {
           onChange={setAgentId}
           mono
           placeholder="Agent ID"
-          hint="Leave blank for every agent."
         />
         <label className="block space-y-1.5 text-sm">
           <span className="block font-medium">Status</span>
@@ -445,10 +622,9 @@ function UserUsageSection({ userId }: { userId: string }) {
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
-            {USAGE_STATUSES.map((value) => (
-              <option key={value || 'all'} value={value}>
-                {value === '' ? 'Any status' : value.replaceAll('_', ' ')}
-              </option>
+            <option value="">Any status</option>
+            {EXECUTION_STATUSES.map((value) => (
+              <option key={value} value={value}>{displayExecutionStatus(value)}</option>
             ))}
           </select>
         </label>
@@ -463,41 +639,90 @@ function UserUsageSection({ userId }: { userId: string }) {
           {summary.total} {summary.total === 1 ? 'execution' : 'executions'}
         </p>
       ) : null}
-      {error ? (
-        <Notice tone="error" title="Could not load usage">
-          {error}
-        </Notice>
-      ) : null}
-      {loading && items.length === 0 ? (
-        <LoadingRows label="Loading" rows={3} />
+      {error ? <Notice tone="error" title="Could not load usage">{error}</Notice> : null}
+      {loading ? (
+        <LoadingRows label="Loading usage" rows={3} />
       ) : items.length === 0 ? (
-        <EmptyState title="No executions">Nothing matches these filters for this user.</EmptyState>
+        error ? null : <EmptyState title="No executions">Nothing matches these filters for this user.</EmptyState>
       ) : (
         <div className="max-w-full overflow-x-auto rounded-2xl border border-border bg-card">
-          <table className="w-max min-w-full text-left text-sm whitespace-nowrap">
+          <table className="min-w-full text-left text-sm">
             <thead className="border-b border-border text-xs tracking-wide text-muted-foreground uppercase">
               <tr>
-                <th className="px-4 py-3 font-medium">Started</th>
-                <th className="px-4 py-3 font-medium">Agent</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Duration</th>
+                <th scope="col" className="px-4 py-3 font-medium">Started / User</th>
+                <th scope="col" className="px-4 py-3 font-medium">Agent / Models</th>
+                <th scope="col" className="px-4 py-3 font-medium">Tokens</th>
+                <th scope="col" className="px-4 py-3 font-medium">Estimated model cost</th>
+                <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                <th scope="col" className="px-4 py-3 font-medium">Active duration</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={item.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3">{formatDateTime(item.started_at)}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{item.agent_id}</td>
-                  <td className="px-4 py-3">{item.status}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {item.duration_ms === null ? '—' : `${item.duration_ms} ms`}
+                <tr key={item.id} className={cn(
+                  'border-b border-border align-top last:border-0',
+                  item.id === selection && 'bg-primary-soft',
+                )}>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      aria-expanded={item.id === selection}
+                      aria-controls={item.id === selection ? detailId : undefined}
+                      className="text-left font-medium text-primary hover:underline"
+                      onClick={() => {
+                        setDetail(null)
+                        setDetailError(null)
+                        setSelection(item.id === selection ? null : item.id)
+                      }}
+                    >
+                      {formatDateTime(item.started_at)}
+                    </button>
+                    <div className="text-xs text-muted-foreground">{userLabel}</div>
                   </td>
+                  <td className="px-4 py-3">
+                    <p className="font-mono text-xs">{item.agent_id}</p>
+                    <p className="mt-1 max-w-56 text-xs break-words text-muted-foreground">
+                      {item.models.map(({ provider, model }) => `${provider}/${model}`).join(', ') || '—'}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3"><TokenTotals tokens={item.tokens} /></td>
+                  <td className="px-4 py-3"><ModelCosts cost={item.estimated_model_cost} /></td>
+                  <td className="px-4 py-3">{displayExecutionStatus(item.status)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{formatDuration(item.duration_ms)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {cursor ? (
+        <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </Button>
+      ) : null}
+      {selection ? (
+        <section
+          id={detailId}
+          ref={detailSection}
+          aria-label="Execution details"
+          className="space-y-4 rounded-2xl border border-border bg-card p-4 sm:p-5"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-serif text-lg">Execution details</h3>
+              {detail ? (
+                <p className="text-xs text-muted-foreground">
+                  {displayExecutionStatus(detail.status)} · {formatDuration(detail.duration_ms)} active
+                </p>
+              ) : null}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setSelection(null)}>Close</Button>
+          </div>
+          {detailError ? (
+            <Notice tone="error" title="Could not load execution details">{detailError}</Notice>
+          ) : detail ? <UsageRunDetail run={detail} /> : <LoadingRows label="Loading execution details" rows={2} />}
+        </section>
+      ) : null}
     </div>
   )
 }

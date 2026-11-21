@@ -49,3 +49,4 @@ class AgentExecution(Base):
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     langsmith_run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    usage_capture: Mapped[str | None] = mapped_column(String(16))

@@ -3,8 +3,6 @@ import type {
   AgentConfiguration,
   DirectoryUser,
   EffectiveAccess,
-  ExecutionRecord,
-  ExecutionSummary,
   GroupMembership,
   GroupRecord,
   LlmModel,
@@ -57,14 +55,6 @@ let usersEpoch = 0
 
 const userAccess = new Map<string, EffectiveAccess[]>()
 let userAccessVersion = 0
-
-export type CachedUserUsage = {
-  items: ExecutionRecord[]
-  summary: ExecutionSummary
-}
-
-const userUsage = new Map<string, CachedUserUsage>()
-let userUsageVersion = 0
 
 function rememberGroupRecords(items: GroupRecord[]) {
   for (const item of items) {
@@ -167,30 +157,6 @@ export function clearUserAccessCache() {
   userAccess.clear()
 }
 
-export function userUsageCacheKey(
-  userId: string,
-  query: { agentId: string; status: string; from: string; to: string },
-): string {
-  return `${userId}\n${query.agentId}\n${query.status}\n${query.from}\n${query.to}`
-}
-
-export function readCachedUserUsage(key: string): CachedUserUsage | null {
-  return userUsage.get(key) ?? null
-}
-
-export function writeCachedUserUsage(key: string, value: CachedUserUsage) {
-  userUsage.set(key, value)
-}
-
-export function userUsageEpoch(): number {
-  return userUsageVersion
-}
-
-export function clearUserUsageCache() {
-  userUsageVersion += 1
-  userUsage.clear()
-}
-
 export function clearGroupsCache() {
   groupsEpoch += 1
   groups.value = null
@@ -249,7 +215,6 @@ export function clearReadCache() {
   skills.inflight = null
   clearGroupsCache()
   clearUsersCache()
-  clearUserUsageCache()
   configurations.clear()
   accessConfigs.clear()
   memberships.clear()

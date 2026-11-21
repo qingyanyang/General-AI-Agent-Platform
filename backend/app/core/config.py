@@ -11,6 +11,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.mcp_allowlist import ApprovedMcpServer, parse_approved_mcp_servers
+from app.core.model_rates import ModelRate
 
 # Process-default convenience: DeepSeek + unset/OpenAI default model → flash.
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
@@ -115,6 +116,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str | None = None
+    llm_stream_usage: bool | None = None
+    llm_rate_catalog: tuple[ModelRate, ...] = ()
     # JSON array of {provider, model, temperature_min?, temperature_max?}
     approved_llm_models: str | list[Any] = ""
     agent_recursion_limit: int = 10
@@ -159,6 +162,14 @@ class Settings(BaseSettings):
     @classmethod
     def _keep_approved_raw(cls, value: Any) -> Any:
         return value
+
+    @field_validator("llm_rate_catalog")
+    @classmethod
+    def _unique_model_rates(cls, rates: tuple[ModelRate, ...]) -> tuple[ModelRate, ...]:
+        keys = {(rate.provider, rate.model) for rate in rates}
+        if len(keys) != len(rates):
+            raise ValueError("LLM_RATE_CATALOG requires one entry per provider and model")
+        return rates
 
     @field_validator("approved_mcp_servers", mode="before")
     @classmethod
