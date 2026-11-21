@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.checkpointer import thread_id_for_session
@@ -644,6 +645,54 @@ def put_agent_instruction_skills(
             detail=str(exc),
         ) from exc
     return _instruction_skills_out(items)
+
+
+class KnowledgeReference(BaseModel):
+    id: uuid.UUID
+    name: str = Field(min_length=1, max_length=255)
+    size: str = Field(min_length=1, max_length=32)
+
+
+class KnowledgeReferences(BaseModel):
+    items: list[KnowledgeReference] = Field(max_length=100)
+
+
+def _require_knowledge_editor(db: Session, caller: AuthenticatedUser, agent: Agent) -> None:
+    if not access_service.user_can_edit_instruction_skills_for_agent(
+        db, agent=agent, user_id=caller.user_id, permissions=caller.permissions,
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_AGENT_ACCESS_DENIED)
+
+
+@router.get("/{agent_id}/knowledge-references", response_model=KnowledgeReferences)
+def get_knowledge_references(
+    agent_id: str,
+    caller: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KnowledgeReferences:
+    agent = _require_agent(db, agent_id)
+    _require_knowledge_editor(db, caller, agent)
+    return KnowledgeReferences.model_validate({"items": agent.knowledge_references})
+
+
+@router.put("/{agent_id}/knowledge-references", response_model=KnowledgeReferences)
+def replace_knowledge_references(
+    agent_id: str,
+    body: KnowledgeReferences,
+    caller: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KnowledgeReferences:
+    agent = db.scalar(select(Agent).where(Agent.id == agent_id).with_for_update())
+    if agent is None:
+        raise _http_agent_not_found()
+    _require_knowledge_editor(db, caller, agent)
+    if len({item.id for item in body.items}) != len(body.items):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate reference IDs",
+        )
+    agent.knowledge_references = [item.model_dump(mode="json") for item in body.items]
+    db.commit()
+    return body
 
 
 @router.get("/{agent_id}/configuration", response_model=AgentConfigurationOut)

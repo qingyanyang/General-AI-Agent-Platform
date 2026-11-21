@@ -39,6 +39,11 @@ param postgresSchema = 'agent_platform'
 // Non-secret Auth0 API settings (protected routes return 503 without them).
 param auth0Domain = 'dev-pf7wi26tb5bj8qxz.us.auth0.com'
 param auth0Audience = 'https://api.agent-platform'
+// Management API invites: CI/local deploy sets enableAuth0Management=true when AUTH0_MGMT_* secrets exist.
+param auth0MgmtClientId = readEnvironmentVariable('AUTH0_MGMT_CLIENT_ID', '')
+param auth0MgmtClientSecret = readEnvironmentVariable('AUTH0_MGMT_CLIENT_SECRET', '')
+param enableAuth0Management = false
+param auth0DbConnection = 'Username-Password-Authentication'
 
 // Phase 1: false — no Container App until a public GHCR image exists.
 // Phase 2: set true + containerImage = 'ghcr.io/<github-username>/agent-platform-api:<tag>'

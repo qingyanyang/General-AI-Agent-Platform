@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     # Auth0 API access tokens. Domain is a hostname only (no scheme or path).
     auth0_domain: str | None = None
     auth0_audience: str | None = None
+    # Reject tokens that do not carry an explicit email_verified=true claim.
+    # Turn this on after the Auth0 post-login Action adds that claim.
+    auth0_require_verified_email: bool = False
+    # Machine-to-machine application allowed to read users and assign roles.
+    auth0_mgmt_client_id: str | None = None
+    auth0_mgmt_client_secret: str | None = None
+    auth0_db_connection: str = "Username-Password-Authentication"
     log_level: str = "INFO"
     # JSON array of {name, url}. Empty means no MCP tools. No credentials in this version.
     approved_mcp_servers: str | list[Any] = ""

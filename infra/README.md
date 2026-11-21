@@ -84,7 +84,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 1. **Bootstrap** — create `rg-agent-platform-demo`.
 2. **Phase 1** — `deployContainerApp = false`: LAW, App Insights, Storage, UAMI, CAE, SWA.
 3. **Manual once** — GitHub OIDC + RBAC; create Supabase project; push a **public** GHCR image.
-4. **Phase 2** — set `deployContainerApp = true`, `containerImage = 'ghcr.io/<user>/agent-platform-api:<tag>'`, supply `DATABASE_URL` (and optionally `LLM_API_KEY` / `LANGSMITH_API_KEY`), redeploy.
+4. **Phase 2** — set `deployContainerApp = true`, `containerImage = 'ghcr.io/<user>/agent-platform-api:<tag>'`, supply `DATABASE_URL` (and optionally `LLM_API_KEY` / `LANGSMITH_API_KEY` / `AUTH0_MGMT_*`), redeploy.
 5. **Ongoing** — `backend-cd` (GHCR push + image update) / `frontend-cd`. Prefer app CD over full infra CD.
 
 ---
@@ -100,6 +100,7 @@ After Supabase + GHCR are verified, delete old Azure resources **manually** (com
 | `DATABASE_URL` | When `deployContainerApp = true` | Supabase session-pooler URL → ACA secret `database-url` → env `DATABASE_URL` |
 | `LLM_API_KEY` | Optional | When set, scripts pass `enableLlmApiKey=true` + `llmApiKey` → ACA secret `llm-api-key`. Demo expects a **DeepSeek** key (`llmProvider=deepseek` in `demo.bicepparam`) |
 | `LANGSMITH_API_KEY` | Optional | When set, scripts pass `enableLangsmithTracing=true` + `langsmithApiKey` → ACA secret + `LANGSMITH_TRACING=true`. Project is always `agent-platform-{ENVIRONMENT}` (demo → `agent-platform-demo`). Demo sets APAC `langsmithEndpoint` in params |
+| `AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` | Optional | When both are set, scripts pass `enableAuth0Management=true` → ACA env `AUTH0_MGMT_CLIENT_ID` and secret `auth0-mgmt-client-secret`. Needed for Add user / role assignment on the deployed API |
 | `containerImage` (param) | When `deployContainerApp = true` | Public `ghcr.io/...` reference |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | frontend-cd | SWA deploy |
 | `CONTAINER_APP_NAME` (GitHub var) | backend-cd | Image update target |
@@ -119,11 +120,11 @@ postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.sup
 
 Application schema: `POSTGRES_SCHEMA=agent_platform` (non-secret env on the Container App).
 
-Auth: `auth0Domain` / `auth0Audience` params set `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` (non-secret). Without them, protected API routes return 503. CORS: the Static Web App URL is always added to `CORS_ALLOWED_ORIGINS` and Blob CORS; `corsAllowedOrigins` adds extra origins such as local dev.
+Auth: `auth0Domain` / `auth0Audience` params set `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` (non-secret). Without them, protected API routes return 503. `auth0DbConnection` sets `AUTH0_DB_CONNECTION` (default `Username-Password-Authentication`). Management API invites need both `AUTH0_MGMT_*` GitHub secrets and an infra deploy after they are set. CORS: the Static Web App URL is always added to `CORS_ALLOWED_ORIGINS` and Blob CORS; `corsAllowedOrigins` adds extra origins such as local dev.
 
 ### Option A secret ownership
 
-Bicep declares `database-url` always (Phase 2), and optional secrets only when their `enable*` flags are true (`llm-api-key`, `langsmith-api-key`). ARM cannot reliably `empty()` a `@secure()` value, so deploy scripts set those flags when the env vars are present. Non-secret LLM config (`LLM_PROVIDER`, optional `LLM_MODEL` / `LLM_BASE_URL`) always comes from Bicep params. Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
+Bicep declares `database-url` always (Phase 2), and optional secrets only when their `enable*` flags are true (`llm-api-key`, `langsmith-api-key`, `auth0-mgmt-client-secret`). ARM cannot reliably `empty()` a `@secure()` value, so deploy scripts set those flags when the env vars are present. Non-secret LLM config (`LLM_PROVIDER`, optional `LLM_MODEL` / `LLM_BASE_URL`) always comes from Bicep params. Do not manage secrets via CLI/portal — a Bicep `secrets` array is replace-semantics. backend-cd updates **image only**.
 
 ### Validate before deploy
 
@@ -131,6 +132,8 @@ Bicep declares `database-url` always (Phase 2), and optional secrets only when t
 export DATABASE_URL='...'        # Phase 2 (required)
 # export LLM_API_KEY='...'       # optional
 # export LANGSMITH_API_KEY='...' # optional (demo traces → agent-platform-demo)
+# export AUTH0_MGMT_CLIENT_ID='...'     # optional invites
+# export AUTH0_MGMT_CLIENT_SECRET='...' # optional invites
 ./infra/scripts/validate-deploy-secrets.sh infra/parameters/demo.bicepparam
 ```
 
@@ -207,11 +210,11 @@ Bicep no longer manages these resources; leaving them undeleted only incurs cost
 | Workflow | Role |
 | --- | --- |
 | `infra-ci.yml` | Bicep build/lint; optional what-if |
-| `infra-cd.yml` | Manual deploy; `DATABASE_URL` (+ optional `LLM_API_KEY`, `LANGSMITH_API_KEY`) |
+| `infra-cd.yml` | Manual deploy; `DATABASE_URL` (+ optional `LLM_API_KEY`, `LANGSMITH_API_KEY`, `AUTH0_MGMT_*`) |
 | `backend-cd.yml` | GHCR build/push; `alembic upgrade head`; Container App image update; `/health` |
 | `frontend-cd.yml` | SWA deploy |
 
-**Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (optional), `LANGSMITH_API_KEY` (optional), `AZURE_STATIC_WEB_APPS_API_TOKEN`
+**Environment `demo` secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `DATABASE_URL` (Phase 2), `LLM_API_KEY` (optional), `LANGSMITH_API_KEY` (optional), `AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` (optional invites), `AZURE_STATIC_WEB_APPS_API_TOKEN`
 
 **Variables:** `CONTAINER_APP_NAME`, `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, optional `VITE_LANGSMITH_PROJECT_URL`, optional `RUN_INFRA_WHAT_IF`
 

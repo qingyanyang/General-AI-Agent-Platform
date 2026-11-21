@@ -58,6 +58,20 @@ param auth0Domain string = ''
 @description('Auth0 API audience (identifier) for access tokens.')
 param auth0Audience string = ''
 
+@description('Auth0 Management API client id for invites. Used only when enableAuth0Management is true. CI: --parameters auth0MgmtClientId=... auth0MgmtClientSecret=... enableAuth0Management=true')
+@secure()
+param auth0MgmtClientId string = ''
+
+@description('Auth0 Management API client secret for invites. Used only when enableAuth0Management is true.')
+@secure()
+param auth0MgmtClientSecret string = ''
+
+@description('When true, set AUTH0_MGMT_CLIENT_ID / AUTH0_MGMT_CLIENT_SECRET on the Container App.')
+param enableAuth0Management bool = false
+
+@description('Auth0 database connection used when creating invited password users.')
+param auth0DbConnection string = 'Username-Password-Authentication'
+
 @description('When false (Phase 1), skip Container App until a public GHCR image exists.')
 param deployContainerApp bool = false
 
@@ -195,6 +209,10 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
     corsAllowedOrigins: corsOriginsCsv
     auth0Domain: auth0Domain
     auth0Audience: auth0Audience
+    auth0MgmtClientId: auth0MgmtClientId
+    auth0MgmtClientSecret: auth0MgmtClientSecret
+    enableAuth0Management: enableAuth0Management
+    auth0DbConnection: auth0DbConnection
     tags: commonTags
   }
 }

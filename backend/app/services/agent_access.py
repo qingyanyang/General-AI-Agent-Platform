@@ -3,9 +3,13 @@
 Modes are never OR'd. Legacy grant rows do not authorize audience-mode Agents;
 group membership does not authorize legacy-mode Agents.
 
-``agent-access:manage`` provides administrator-wide Agent scope for audience-mode
-VIEW/EXECUTE/CONFIGURE. Platform action permissions are enforced at the route.
-Technical configuration additionally requires ``platform:technical`` at the route.
+``agent-access:manage`` provides administrator-wide VIEW of every Agent,
+including legacy-grant agents and audience agents with an empty group set.
+Audience-mode EXECUTE and CONFIGURE are included. A legacy-grant Agent still
+requires that user's own grant to execute or configure. Group membership does
+not authorize legacy agents, and a legacy grant does not authorize an
+audience-mode agent. Platform action permissions are enforced at the route.
+Technical configuration additionally requires ``platform:technical``.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import ColumnElement
 
 from app.core.auth import USER_ID_MAX_LENGTH
-from app.core.permissions import PERM_AGENT_ACCESS_MANAGE
+from app.core.permissions import PERM_AGENT_ACCESS_MANAGE, PERM_AGENTS_READ
 from app.models.agent import Agent, AgentAudienceMode, AgentAuthorizationMode
 from app.models.agent_access_grant import AgentAccessGrant
 from app.models.agent_group_assignment import AgentGroupAssignment
@@ -159,6 +163,8 @@ def user_has_capability(
 
     mode = agent.authorization_mode
     if mode == AgentAuthorizationMode.LEGACY_GRANTS.value:
+        if _has_manage(permissions) and capability is AgentCapability.VIEW:
+            return True
         return _legacy_grant_allows(
             get_grant(db, user_id=user_id, agent_id=agent_id),
             capability,
@@ -197,19 +203,6 @@ def ensure_agent_capability(
         raise AgentAccessDenied
 
 
-def _user_is_owning_group_leader(
-    db: Session,
-    *,
-    user_id: str,
-    owning_group_id: uuid.UUID,
-) -> bool:
-    membership = db.get(GroupMembership, (owning_group_id, user_id))
-    return (
-        membership is not None
-        and membership.designation == GroupDesignation.LEADER.value
-    )
-
-
 def user_can_edit_instruction_skills(
     db: Session,
     *,
@@ -217,11 +210,7 @@ def user_can_edit_instruction_skills(
     agent_id: str,
     permissions: Collection[str] | None = None,
 ) -> bool:
-    """True when manage or Leader of this Agent's owning group.
-
-    Leadership in an audience-only (non-owning) group does not qualify.
-    A null owning group means no Leader editing. Does not grant Chat execution.
-    """
+    """Allow administrators and group leaders who can view the agent."""
     agent = db.get(Agent, agent_id)
     if agent is None:
         return False
@@ -243,12 +232,22 @@ def user_can_edit_instruction_skills_for_agent(
     """Same decision as ``user_can_edit_instruction_skills`` for a locked Agent row."""
     if _has_manage(permissions):
         return True
-    if agent.owning_group_id is None:
+    if not permissions or PERM_AGENTS_READ not in permissions:
         return False
-    return _user_is_owning_group_leader(
+    leads_group = db.scalar(
+        select(GroupMembership.group_id)
+        .where(
+            GroupMembership.user_id == user_id,
+            GroupMembership.designation == GroupDesignation.LEADER.value,
+        )
+        .limit(1),
+    )
+    return leads_group is not None and user_has_capability(
         db,
         user_id=user_id,
-        owning_group_id=agent.owning_group_id,
+        agent_id=agent.id,
+        capability=AgentCapability.VIEW,
+        permissions=permissions,
     )
 
 
@@ -311,8 +310,16 @@ def viewable_agent_id_clause(
         ),
     ]
     if _has_manage(permissions):
-        # Manage: all audience-mode agents (including empty selected-group sets).
-        clauses.append(Agent.authorization_mode == AgentAuthorizationMode.AUDIENCE.value)
+        # Administrators can discover every agent, including legacy grants
+        # and audience agents whose selected-group set is empty.
+        clauses.append(
+            Agent.authorization_mode.in_(
+                (
+                    AgentAuthorizationMode.AUDIENCE.value,
+                    AgentAuthorizationMode.LEGACY_GRANTS.value,
+                ),
+            ),
+        )
 
     return or_(*clauses)
 

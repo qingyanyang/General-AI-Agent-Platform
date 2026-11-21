@@ -36,6 +36,23 @@ def _admin_headers() -> dict[str, str]:
     return headers(ADMIN)
 
 
+def _as_user(*permissions: str):
+    perms = frozenset(permissions)
+
+    def _current(request: Request) -> AuthenticatedUser:
+        user_id = request.headers.get("x-user-id", USER)
+        return AuthenticatedUser(user_id=user_id, permissions=perms)
+
+    return _current
+
+
+def _without_manage(api_client: TestClient) -> None:
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        PERM_AGENTS_READ,
+        PERM_AGENTS_EXECUTE,
+    )
+
+
 def test_upsert_and_revoke_grant(
     api_client: TestClient,
     db_session: Session,
@@ -181,6 +198,7 @@ def test_list_filters_non_viewable_agents(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
+    _without_manage(api_client)
     seed_agent_grant(db_session, USER, REPORTING, can_view=True, can_execute=True)
     seed_agent_grant(db_session, USER, FINANCE, can_view=False, can_execute=True)
     assert (
@@ -208,6 +226,7 @@ def test_owned_without_view_returns_403_not_404(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
+    _without_manage(api_client)
     seed_agent_grant(db_session, USER, REPORTING, can_view=False, can_execute=True)
     created = api_client.post(
         "/sessions",
@@ -300,6 +319,7 @@ def test_stateless_run_requires_grant_on_settings_agent(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _without_manage(api_client)
     called = False
 
     async def fake_run(message: str, **kwargs: Any) -> AgentResult:
@@ -339,6 +359,7 @@ def test_agents_run_execute_only_hides_accumulated_messages(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _without_manage(api_client)
     seed_agent_grant(db_session, USER, "default", can_view=False, can_execute=True)
     with_saver(api_client)
 
@@ -377,6 +398,7 @@ def test_json_and_sse_execute_only_do_not_replay_prior_message_objects(
     db_session: Session,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _without_manage(api_client)
     seed_agent_grant(db_session, USER, "default", can_view=True, can_execute=True)
     with_saver(api_client)
     created = api_client.post(

@@ -48,6 +48,8 @@ class GroupOut(BaseModel):
 
 class GroupListItemOut(GroupOut):
     designation: DesignationLiteral | None
+    member_count: int = 0
+    agent_count: int = 0
 
 
 class GroupListOut(BaseModel):
@@ -57,6 +59,22 @@ class GroupListOut(BaseModel):
 
 class GroupDetailOut(GroupOut):
     designation: DesignationLiteral | None
+    member_count: int = 0
+    agent_count: int = 0
+
+
+class GroupAgentOut(BaseModel):
+    agent_id: str
+    agent_name: str | None
+    is_owning: bool
+
+
+class GroupAgentListOut(BaseModel):
+    items: list[GroupAgentOut]
+
+
+class GroupAgentAssign(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=64)
 
 
 class MembershipUpsert(BaseModel):
@@ -68,6 +86,8 @@ class MembershipOut(BaseModel):
     group_id: uuid.UUID
     user_id: str
     designation: DesignationLiteral
+    display_name: str | None = None
+    email: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.agent_execution import AgentExecution, AgentExecutionStatus
@@ -221,8 +221,10 @@ def list_owned_executions(
     status_filter: str | None = None,
     agent_id: str | None = None,
     session_id: uuid.UUID | None = None,
+    started_from: datetime | None = None,
+    started_to: datetime | None = None,
 ) -> ExecutionPage:
-    """List the caller's executions only (requires platform ``agents:read`` at the route)."""
+    """List one user's executions. The route decides whose id is allowed."""
     stmt = select(AgentExecution).where(AgentExecution.user_id == user_id)
     if status_filter is not None:
         stmt = stmt.where(AgentExecution.status == status_filter)
@@ -230,6 +232,10 @@ def list_owned_executions(
         stmt = stmt.where(AgentExecution.agent_id == agent_id)
     if session_id is not None:
         stmt = stmt.where(AgentExecution.session_id == session_id)
+    if started_from is not None:
+        stmt = stmt.where(AgentExecution.started_at >= started_from)
+    if started_to is not None:
+        stmt = stmt.where(AgentExecution.started_at <= started_to)
     stmt = stmt.order_by(
         AgentExecution.started_at.desc(),
         AgentExecution.id.desc(),
@@ -248,3 +254,24 @@ def list_owned_executions(
         next_cursor = encode_cursor(last.started_at, last.id)
         rows = rows[:limit]
     return ExecutionPage(items=rows, next_cursor=next_cursor)
+
+
+def summarize_executions(
+    db: Session,
+    *,
+    user_id: str,
+    status_filter: str | None = None,
+    agent_id: str | None = None,
+    started_from: datetime | None = None,
+    started_to: datetime | None = None,
+) -> dict[str, int]:
+    stmt = select(AgentExecution.status, func.count()).where(AgentExecution.user_id == user_id)
+    if status_filter is not None:
+        stmt = stmt.where(AgentExecution.status == status_filter)
+    if agent_id is not None:
+        stmt = stmt.where(AgentExecution.agent_id == agent_id)
+    if started_from is not None:
+        stmt = stmt.where(AgentExecution.started_at >= started_from)
+    if started_to is not None:
+        stmt = stmt.where(AgentExecution.started_at <= started_to)
+    return {status_name: count for status_name, count in db.execute(stmt.group_by(AgentExecution.status)).all()}

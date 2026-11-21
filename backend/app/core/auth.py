@@ -22,6 +22,7 @@ from jwt.algorithms import RSAAlgorithm
 logger = logging.getLogger(__name__)
 
 USER_ID_MAX_LENGTH = 512
+JWT_CLOCK_SKEW_SECONDS = 5
 JWKS_CACHE_TTL_SECONDS = 600.0
 JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
 AUTH_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=2.0)
@@ -33,6 +34,10 @@ class AuthenticatedUser:
 
     user_id: str
     permissions: frozenset[str]
+    email: str | None = None
+    display_name: str | None = None
+    # None means the token did not say. False is an explicit unverified claim.
+    email_verified: bool | None = None
 
 
 _HOSTNAME_RE = re.compile(
@@ -80,12 +85,12 @@ def jwks_url_for_domain(domain: str) -> str:
 def extract_bearer_token(authorization: str | None) -> str:
     """Return the token from a single ``Bearer`` credential."""
     if authorization is None:
-        raise AuthRejected
+        raise AuthRejected("missing Authorization header")
     scheme, separator, token = authorization.partition(" ")
     if separator != " " or scheme.lower() != "bearer" or not token or token != token.strip():
-        raise AuthRejected
+        raise AuthRejected("invalid Bearer header format")
     if " " in token:
-        raise AuthRejected
+        raise AuthRejected("invalid Bearer header format")
     return token
 
 
@@ -201,7 +206,7 @@ class JwksCache:
             if cooling:
                 if self._last_fetch_failed:
                     return self._stale_or_unavailable(kid)
-                raise AuthRejected
+                raise AuthRejected("signing key ID absent from cached JWKS")
             try:
                 keys = await self._fetch()
             except AuthUnavailable:
@@ -219,7 +224,7 @@ class JwksCache:
             self._last_fetch_failed = False
             key = keys.get(kid)
             if key is None:
-                raise AuthRejected
+                raise AuthRejected("signing key ID absent from refreshed JWKS")
             return key
 
     def _mark_failed(self) -> None:
@@ -238,10 +243,52 @@ def _unverified_header(token: str) -> dict[str, Any]:
     try:
         header = jwt.get_unverified_header(token)
     except jwt.InvalidTokenError as exc:
-        raise AuthRejected from exc
+        raise AuthRejected(f"JWT header: {type(exc).__name__}") from exc
     if not isinstance(header, dict):
-        raise AuthRejected
+        raise AuthRejected("invalid JWT header")
     return header
+
+
+def profile_from_access_claims(
+    claims: dict[str, Any],
+    audience: str,
+) -> tuple[str | None, str | None, bool | None]:
+    """Read email, name, and verification from namespaced or standard claims.
+
+    Email is returned only when verification is explicitly true. Auth0 access
+    tokens carry these on ``{audience}/email`` and ``{audience}/email_verified``
+    after the post-login Action adds them.
+    """
+    namespace = audience.rstrip("/")
+    verified_raw = claims.get(f"{namespace}/email_verified")
+    if not isinstance(verified_raw, bool):
+        verified_raw = claims.get("email_verified")
+    verified = verified_raw if isinstance(verified_raw, bool) else None
+
+    email_raw = claims.get(f"{namespace}/email")
+    if not isinstance(email_raw, str):
+        email_raw = claims.get("email")
+    email: str | None = None
+    if isinstance(email_raw, str):
+        candidate = email_raw.strip().lower()
+        if (
+            "@" in candidate
+            and " " not in candidate
+            and len(candidate) <= 320
+        ):
+            email = candidate
+    if verified is not True:
+        email = None
+
+    name_raw = claims.get(f"{namespace}/name")
+    if not isinstance(name_raw, str):
+        name_raw = claims.get("name")
+    name = name_raw.strip() if isinstance(name_raw, str) else ""
+    if not name:
+        display_name = None
+    else:
+        display_name = name[:256]
+    return email, display_name, verified
 
 
 def parse_permissions_claim(raw: Any) -> frozenset[str]:
@@ -275,7 +322,7 @@ async def verify_access_token(
     header = _unverified_header(token)
     kid = header.get("kid")
     if header.get("alg") != "RS256" or not isinstance(kid, str) or not kid:
-        raise AuthRejected
+        raise AuthRejected("JWT requires RS256 and a signing key ID")
     key = await jwks.get_key(kid)
     try:
         claims = jwt.decode(
@@ -284,10 +331,12 @@ async def verify_access_token(
             algorithms=["RS256"],
             audience=audience,
             issuer=issuer,
+            leeway=JWT_CLOCK_SKEW_SECONDS,
             options={"require": ["exp", "iss", "aud", "sub"]},
         )
     except jwt.InvalidTokenError as exc:
-        raise AuthRejected from exc
+        raise AuthRejected(f"JWT verification: {type(exc).__name__}") from exc
+    email, display_name, email_verified = profile_from_access_claims(claims, audience)
     subject = claims.get("sub")
     if (
         not isinstance(subject, str)
@@ -295,8 +344,11 @@ async def verify_access_token(
         or subject != subject.strip()
         or len(subject) > USER_ID_MAX_LENGTH
     ):
-        raise AuthRejected
+        raise AuthRejected("invalid JWT subject")
     return AuthenticatedUser(
         user_id=subject,
         permissions=parse_permissions_claim(claims.get("permissions")),
+        email=email,
+        display_name=display_name,
+        email_verified=email_verified,
     )

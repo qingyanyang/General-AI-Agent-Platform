@@ -159,6 +159,31 @@ def test_membership_does_not_authorize_legacy_agent(
     assert api_client.get("/agents/default", headers=headers(USER)).status_code == 404
 
 
+def test_manage_can_view_legacy_agent_without_a_grant(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    agent = db_session.get(Agent, "default")
+    assert agent is not None
+    assert agent.authorization_mode == AgentAuthorizationMode.LEGACY_GRANTS.value
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        ADMIN,
+        PERM_AGENTS_READ,
+        PERM_AGENTS_EXECUTE,
+        PERM_AGENT_ACCESS_MANAGE,
+    )
+    listed = api_client.get("/agents", headers=headers(ADMIN))
+    assert listed.status_code == 200
+    assert any(item["id"] == "default" for item in listed.json()["items"])
+    assert api_client.get("/agents/default", headers=headers(ADMIN)).status_code == 200
+    created = api_client.post(
+        "/sessions",
+        json={"agent_id": "default"},
+        headers=headers(ADMIN),
+    )
+    assert created.status_code == 403
+
+
 def test_company_audience_allows_authenticated_user(
     api_client: TestClient,
     db_session: Session,

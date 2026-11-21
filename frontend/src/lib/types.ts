@@ -78,7 +78,8 @@ export type ApprovalDecisionName = 'approve' | 'reject'
 export interface ChatClient {
   listAgents(cursor?: string): Promise<AgentList>
   listSessions(cursor?: string): Promise<ChatSessionList>
-  createSession(agentId: string): Promise<ChatSession>
+  createSession(agentId: string, title?: string): Promise<ChatSession>
+  deleteSession(sessionId: string): Promise<void>
   listMessages(sessionId: string): Promise<ChatMessage[]>
   listApprovals(sessionId: string): Promise<PendingApproval[]>
   streamMessage(

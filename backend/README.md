@@ -47,6 +47,8 @@ Authorization: Bearer <access_token>
 
 Validation uses RS256 against Auth0 JWKS (`https://{AUTH0_DOMAIN}/.well-known/jwks.json`), and requires issuer `https://{AUTH0_DOMAIN}/`, audience, expiry, and a non-empty `sub` (max 512 characters — stored as session `user_id`). ID tokens and tokens for other APIs are rejected. `X-User-Id` is ignored and cannot set identity.
 
+An access token with `email_verified: false` is rejected. Install `backend/auth0/post-login-verify-email.js` so Auth0 also refuses the login and adds `{AUTH0_AUDIENCE}/email`, `{AUTH0_AUDIENCE}/email_verified`, and `{AUTH0_AUDIENCE}/name` to the access token. Set `AUTH0_REQUIRE_VERIFIED_EMAIL=true` after that Action is active. Invitations use a Management API application (`AUTH0_MGMT_CLIENT_ID`, `AUTH0_MGMT_CLIENT_SECRET`) to find or create the one linked user for an email and assign the User, Admin, or Super Admin role. The database connection name defaults to `Username-Password-Authentication` (`AUTH0_DB_CONNECTION`). For the deployed API, add those two values as GitHub secrets and run an infra deploy so the Container App receives them.
+
 | Condition | Status |
 | --- | --- |
 | Missing / invalid / expired / wrong-issuer / wrong-audience / wrong-alg token | **401** with `WWW-Authenticate: Bearer` |
@@ -83,7 +85,7 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 | `agents:read` | List/get agents (with view/audience eligibility), sessions, and message history |
 | `agents:execute` | Create/archive sessions, post/stream messages, `POST /agents/run` |
 | `agents:configure` | Create (with manage) / update metadata / deactivate agents |
-| `agent-access:manage` | Business access admin: grants, access-config, activate; audience-mode Agent scope |
+| `agent-access:manage` | Business access admin: grants, access-config, activate; view every Agent. Audience-mode use is included. Legacy execution still needs that user's grant |
 | `platform:technical` | Technical configuration and protected catalogs (prompt, tools, models, skill detail) |
 
 | Role | Permissions |
@@ -94,7 +96,7 @@ Auth0 RBAC puts API permissions on the access token (`permissions` claim). The A
 
 Do **not** treat Agent Developer as a target role. Group leadership does **not** grant `platform:technical`. Existing Auth0 roles may remain during migration; do **not** grant technical permission to Admin (or legacy Agent Developer) as a compatibility shortcut.
 
-Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership. Modes are never OR'd: legacy grants authorize only `legacy_grants` Agents; audience membership authorizes only `audience` Agents. `agent-access:manage` provides administrator-wide Agent scope for audience-mode Agents but never cross-user session access.
+Missing or incomplete permissions → **403** (`Permission denied`). Platform permissions do **not** bypass session ownership. Modes are never OR'd: legacy grants authorize only `legacy_grants` Agents; audience membership authorizes only `audience` Agents. `agent-access:manage` can view every Agent, including legacy-grant Agents and audience Agents with an empty group set. Audience-mode execution is included. Executing a legacy-grant Agent still requires that user's execute grant. It never grants cross-user session access.
 
 ### Agent catalog (#19)
 
@@ -108,7 +110,10 @@ Agents are persisted rows (`id`, `name`, `description`, `status`, `created_by`).
 | `PATCH` | `/agents/{agent_id}` | `agents:configure` + CONFIGURE scope — `name` / `description` only |
 | `GET`/`PUT` | `/agents/{agent_id}/access-config` | `agent-access:manage` — audience/owning-group configuration |
 | `POST` | `/agents/{agent_id}/access-config/activate` | `agent-access:manage` — sets `authorization_mode=audience` from saved config; does not delete grants |
-| `GET`/`PUT` | `/agents/{agent_id}/instruction-skills` | authenticated; `agent-access:manage` **or** Leader of this Agent's `owning_group_id` — published business Instruction Skills |
+| `GET`/`PUT` | `/agents/{agent_id}/instruction-skills` | authenticated; `agent-access:manage` **or** a group Leader with view access to the Agent — published business Instruction Skills |
+| `GET`/`PUT` | `/agents/{agent_id}/knowledge-references` | `agent-access:manage` or a group Leader with view access to the agent. Stores document names and sizes. |
+| `GET` | `/groups`, `/groups/{group_id}` | authenticated. Group lists and details include the caller’s designation when present. |
+| `GET` | `/groups/{group_id}/memberships`, `/groups/{group_id}/agents` | group members, Leaders, and callers with `agent-access:manage`. |
 | `GET` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — system prompt, LLM, temperature, tool and skill assignments |
 | `PUT` | `/agents/{agent_id}/configuration` | `platform:technical` + CONFIGURE scope — full replace (row-locked) |
 | `POST` | `/agents/{agent_id}/deactivate` | `agents:configure` + CONFIGURE scope — soft-deactivate (idempotent) |
@@ -399,7 +404,7 @@ Per-agent **business** instructions distinct from the technical `system_prompt` 
 
 - **Fields:** ordered `items[]` of `{ name, description, instructions }` (prototype-aligned). No resource/script/tool/permission fields. Unknown JSON fields are rejected.
 - **Limits:** at most **50** items; `name` ≤ 120 (trimmed, non-empty, unique case-insensitive); `description` ≤ 2 000 (trimmed, may be empty); `instructions` ≤ 20 000 (reject whitespace-only; preserve accepted text exactly); aggregate length of all submitted name+description+instructions ≤ **50 000**. Empty `items` clears the published collection.
-- **Authorization:** `agent-access:manage`, or current Leader of this Agent's `owning_group_id`. Null owning group → no Leader editing. Audience-only leadership, `agents:configure` alone, and `platform:technical` alone are insufficient. Editing does not activate audience mode or change group memberships. Unknown Agent → **404**; existing Agent without edit rights → **403**. Unauthenticated → **401**.
+- **Authorization:** `agent-access:manage`, or a group Leader with view access under the Agent’s current audience or legacy grant rules. Editing does not activate audience mode or change group memberships. Unknown Agent → **404**; existing Agent without edit rights → **403**. Unauthenticated → **401**.
 - **Persistence:** table `agent_instruction_skills`; PUT locks the Agent row (`FOR UPDATE`), re-checks authorization, validates **before** deletes, then replaces in one transaction. SQLite tests do **not** prove PostgreSQL row-lock concurrency.
 - **Runtime:** loaded into the immutable execution snapshot at the API boundary (JSON, SSE, stateless/session run, approval resume). Composed into the ephemeral system prompt after `system_prompt` and before the curated skill catalog. Not tools, not `skill_names`, not checkpointed messages. Publication affects the **next** request's snapshot; an in-flight snapshot is unchanged. Resume keeps the frozen tool batch; the following model call sees the new instructions.
 
@@ -481,4 +486,4 @@ docker run --rm -p 8000:8000 -e ENVIRONMENT=demo agent-platform-api:local
 
 ## Azure
 
-Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, optional `LLM_API_KEY` / LangSmith). `CORS_ALLOWED_ORIGINS` always includes the Static Web App URL plus any `corsAllowedOrigins` param entries. Set `CHECKPOINTS_SCHEMA` when overriding the default `langgraph` checkpoint schema. `backend-cd` builds/pushes GHCR, runs `alembic upgrade head` from the runner with the `demo` environment's `DATABASE_URL` and `POSTGRES_SCHEMA=agent_platform`, then updates the Container App image. A failed migration stops the deploy. The runner is IPv4-only, so `DATABASE_URL` must be the Supabase session pooler URL. Checkpointer tables are created by `AsyncPostgresSaver.setup()` on app startup. `DATABASE_URL` may use `postgresql://` or `postgresql+psycopg://`; settings normalize it to the installed psycopg 3 driver.
+Container App env vars are owned by Bicep (`ENVIRONMENT`, `DATABASE_URL`, `POSTGRES_SCHEMA`, `CORS_ALLOWED_ORIGINS`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_DB_CONNECTION`, optional `LLM_API_KEY` / LangSmith / `AUTH0_MGMT_*`). `CORS_ALLOWED_ORIGINS` always includes the Static Web App URL plus any `corsAllowedOrigins` param entries. Set `CHECKPOINTS_SCHEMA` when overriding the default `langgraph` checkpoint schema. `backend-cd` builds/pushes GHCR, runs `alembic upgrade head` from the runner with the `demo` environment's `DATABASE_URL` and `POSTGRES_SCHEMA=agent_platform`, then updates the Container App image. A failed migration stops the deploy. The runner is IPv4-only, so `DATABASE_URL` must be the Supabase session pooler URL. Checkpointer tables are created by `AsyncPostgresSaver.setup()` on app startup. `DATABASE_URL` may use `postgresql://` or `postgresql+psycopg://`; settings normalize it to the installed psycopg 3 driver.

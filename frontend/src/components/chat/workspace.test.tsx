@@ -1,7 +1,11 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { Workspace } from '@/components/chat/workspace'
+import { resetAgentDrafts, storeAgentDraft } from '@/lib/agent-drafts'
+import { clearPreferredAgentId } from '@/lib/chat-preference'
+import { clearTranscriptCache } from '@/lib/transcript-cache'
 import { ApiError } from '@/lib/errors'
 import type {
   Agent,
@@ -52,6 +56,7 @@ function createClient(overrides: Partial<ChatClient>): ChatClient {
     listAgents: unused,
     listSessions: unused,
     createSession: unused,
+    deleteSession: unused,
     listMessages: unused,
     listApprovals: unused,
     streamMessage: unused,
@@ -60,19 +65,40 @@ function createClient(overrides: Partial<ChatClient>): ChatClient {
   }
 }
 
-function renderWorkspace(client: ChatClient, onUnauthorized = vi.fn()) {
+function renderAt(client: ChatClient, path: string, onUnauthorized = vi.fn()) {
   const view = render(
-    <Workspace
-      client={client}
-      accountLabel="Ada"
-      onUnauthorized={onUnauthorized}
-      onSignOut={vi.fn()}
-    />,
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route
+          path="/chat/:agentId?/:sessionId?"
+          element={
+            <Workspace
+              client={client}
+              accountLabel="Ada"
+              onUnauthorized={onUnauthorized}
+              onSignOut={vi.fn()}
+            />
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
   )
   return { ...view, onUnauthorized }
 }
 
+function renderWorkspace(client: ChatClient, onUnauthorized = vi.fn()) {
+  return renderAt(client, '/chat', onUnauthorized)
+}
+
+async function openAgentPicker(user: ReturnType<typeof userEvent.setup>) {
+  const change = screen.queryByRole('button', { name: /Change agent|Choose an agent/i })
+  if (change) {
+    await user.click(change)
+  }
+}
+
 async function chooseAgent(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await openAgentPicker(user)
   await user.click(await screen.findByRole('button', { name }))
 }
 
@@ -85,6 +111,144 @@ async function openSupportSession(
 }
 
 describe('chat workspace', () => {
+  afterEach(() => {
+    cleanup()
+    resetAgentDrafts()
+    clearPreferredAgentId()
+    clearTranscriptCache()
+  })
+
+  it('shows a Draft badge while the agent has unpublished configuration edits', async () => {
+    const user = userEvent.setup()
+    storeAgentDraft(support.id, {
+      technical: {
+        system_prompt: 'Draft prompt',
+        llm_provider: 'openai',
+        llm_model: 'gpt',
+        temperature: '',
+        tool_names: [],
+        skill_names: [],
+        approval_tool_names: [],
+      },
+      skills: null,
+      connections: [],
+      documents: null,
+    })
+    const client = createClient({
+      listAgents: async () => ({ items: [support], next_cursor: null }),
+      listSessions: async () => ({ items: [], next_cursor: null }),
+    })
+    renderWorkspace(client)
+    await chooseAgent(user, 'Support')
+    expect(screen.getAllByText('Draft').length).toBeGreaterThan(0)
+  })
+
+  it('keeps the picked agent selected when switching from an agent URL', async () => {
+    const user = userEvent.setup()
+    const listSessions = vi.fn(async () => ({ items: [], next_cursor: null }))
+    const client = createClient({
+      listAgents: async () => ({ items: [support, billing], next_cursor: null }),
+      listSessions,
+    })
+
+    renderAt(client, '/chat/billing')
+    await screen.findByRole('heading', { name: 'Billing' })
+    await chooseAgent(user, 'Support')
+
+    expect(await screen.findByRole('heading', { name: 'Support' })).toBeInTheDocument()
+    expect(listSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('loads the open session and switches to another without reopening the previous one', async () => {
+    const user = userEvent.setup()
+    const listMessages = vi.fn(async (sessionId: string) => [
+      {
+        role: 'user' as const,
+        content: sessionId === 'alpha' ? 'Alpha history' : 'Beta history',
+      },
+    ])
+    const client = createClient({
+      listAgents: async () => ({ items: [support], next_cursor: null }),
+      listSessions: async () => ({
+        items: [
+          { id: 'alpha', agent_id: 'support', title: 'Alpha' },
+          { id: 'beta', agent_id: 'support', title: 'Beta' },
+        ],
+        next_cursor: null,
+      }),
+      listApprovals: async () => [],
+      listMessages,
+    })
+    renderAt(client, '/chat/support/alpha')
+    expect(await screen.findByText('Alpha history')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Beta' }))
+    expect(await screen.findByText('Beta history')).toBeInTheDocument()
+    expect(screen.queryByText('Alpha history')).not.toBeInTheDocument()
+    await waitFor(() => {
+      const betaLoads = listMessages.mock.calls.filter(([id]) => id === 'beta').length
+      const alphaLoads = listMessages.mock.calls.filter(([id]) => id === 'alpha').length
+      expect(betaLoads).toBeGreaterThan(0)
+      expect(alphaLoads).toBeLessThan(3)
+      expect(betaLoads).toBeLessThan(3)
+    })
+  })
+
+  it('shows a cached conversation immediately while it refreshes', async () => {
+    const user = userEvent.setup()
+    let alphaLoads = 0
+    const refresh = deferred<ChatMessage[]>()
+    const listMessages = vi.fn(async (sessionId: string) => {
+      if (sessionId !== 'alpha') {
+        return [{ role: 'user' as const, content: 'Beta history' }]
+      }
+      alphaLoads += 1
+      if (alphaLoads > 1) {
+        return refresh.promise
+      }
+      return [{ role: 'user' as const, content: 'Alpha history' }]
+    })
+    const client = createClient({
+      listAgents: async () => ({ items: [support], next_cursor: null }),
+      listSessions: async () => ({
+        items: [
+          { id: 'alpha', agent_id: 'support', title: 'Alpha' },
+          { id: 'beta', agent_id: 'support', title: 'Beta' },
+        ],
+        next_cursor: null,
+      }),
+      listApprovals: async () => [],
+      listMessages,
+    })
+    renderAt(client, '/chat/support/alpha')
+    expect(await screen.findByText('Alpha history')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Beta' }))
+    expect(await screen.findByText('Beta history')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Alpha' }))
+    expect(screen.getByText('Alpha history')).toBeInTheDocument()
+    expect(alphaLoads).toBe(2)
+    refresh.resolve([{ role: 'user', content: 'Alpha refreshed' }])
+    expect(await screen.findByText('Alpha refreshed')).toBeInTheDocument()
+  })
+
+  it('selects the first agent, and the last chosen agent on the next visit', async () => {
+    const user = userEvent.setup()
+    const client = createClient({
+      listAgents: async () => ({ items: [support, billing], next_cursor: null }),
+      listSessions: async () => ({ items: [], next_cursor: null }),
+    })
+    const first = renderWorkspace(client)
+    expect(await screen.findByRole('button', { name: /Support/ })).toHaveTextContent('Support')
+    expect(screen.queryByRole('button', { name: 'Billing' })).not.toBeInTheDocument()
+    await openAgentPicker(user)
+    await user.click(screen.getByRole('button', { name: 'Billing' }))
+    expect(screen.getByRole('button', { name: /Change agent/i })).toHaveTextContent('Billing')
+    first.unmount()
+
+    renderWorkspace(client)
+    expect(await screen.findByRole('button', { name: /Billing/ })).toHaveTextContent('Billing')
+    expect(screen.queryByRole('button', { name: 'Support' })).not.toBeInTheDocument()
+  })
+
   it('shows only agents from the API and loads the next page', async () => {
     const user = userEvent.setup()
     const client = createClient({
@@ -96,6 +260,7 @@ describe('chat workspace', () => {
       }),
     })
     renderWorkspace(client)
+    await openAgentPicker(user)
     expect(await screen.findByRole('button', { name: 'Support' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Billing' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Load more agents' }))
@@ -400,13 +565,69 @@ describe('chat workspace', () => {
     expect(screen.getByText('Existing history')).toBeInTheDocument()
   })
 
-  it('keeps history when a new chat or an approval is forbidden', async () => {
+  it('archives empty New chat drafts when an agent is selected', async () => {
+    const user = userEvent.setup()
+    const deleteSession = vi.fn(async () => undefined)
+    const createSession = vi.fn(async () => {
+      throw new Error('should not create on select')
+    })
+    renderWorkspace(
+      createClient({
+        listAgents: async () => ({ items: [support], next_cursor: null }),
+        listSessions: async () => ({
+          items: [
+            { id: 'draft-1', agent_id: 'support', title: 'New chat' },
+            { id: 'draft-2', agent_id: 'support', title: 'New chat' },
+            { id: 'draft-3', agent_id: 'support', title: 'New chat' },
+            { id: 'real-1', agent_id: 'support', title: 'Quarterly review' },
+          ],
+          next_cursor: null,
+        }),
+        listMessages: async (sessionId: string) => {
+          if (sessionId === 'real-1') {
+            return [{ role: 'user', content: 'Please send the file' }]
+          }
+          return []
+        },
+        listApprovals: async () => [],
+        deleteSession,
+        createSession,
+      }),
+    )
+    await chooseAgent(user, 'Support')
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(3))
+    expect(createSession).not.toHaveBeenCalled()
+    expect(await screen.findByRole('button', { name: 'Quarterly review' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'New chat' })).toHaveLength(1)
+  })
+
+  it('creates a session on first send and surfaces create failures without littering history', async () => {
+    const user = userEvent.setup()
+    const createSession = vi.fn(async () => {
+      throw new ApiError(403, 'Forbidden')
+    })
+    renderWorkspace(
+      sessionClient({
+        createSession,
+      }),
+    )
+    await chooseAgent(user, 'Support')
+    expect(await screen.findByText('Choose a conversation or start a new chat.')).toBeInTheDocument()
+    expect(createSession).not.toHaveBeenCalled()
+    await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'hello')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You can view this agent, but you cannot run it.',
+    )
+    expect(createSession).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'New chat' })).toBeInTheDocument()
+  })
+
+  it('keeps history when an approval is forbidden', async () => {
     const user = userEvent.setup()
     renderWorkspace(
       sessionClient({
-        createSession: async () => {
-          throw new ApiError(403, 'Forbidden')
-        },
         decideApproval: async () => {
           throw new ApiError(403, 'Forbidden')
         },
@@ -414,15 +635,65 @@ describe('chat workspace', () => {
     )
     await openSupportSession(user)
     expect(await screen.findByText('Please send the file')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'New chat' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'You can view this agent, but you cannot run it.',
-    )
-    expect(screen.getByText('Please send the file')).toBeInTheDocument()
     expect(screen.getByText('read_file')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Reject' }))
     expect(await screen.findByText('read_file')).toBeInTheDocument()
     expect(screen.getByText('Please send the file')).toBeInTheDocument()
+  })
+
+  it('archives a conversation from the sidebar', async () => {
+    const user = userEvent.setup()
+    const deleteSession = vi.fn(async () => undefined)
+    renderWorkspace(sessionClient({ deleteSession }))
+    await openSupportSession(user)
+    await user.click(screen.getByRole('button', { name: 'Delete Quarterly review' }))
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith('sess-1'))
+    expect(screen.queryByRole('button', { name: 'Quarterly review' })).not.toBeInTheDocument()
+  })
+
+  it('clears the open conversation when starting a new chat without creating a session', async () => {
+    const user = userEvent.setup()
+    const createSession = vi.fn(async () => {
+      throw new Error('should not create on New chat')
+    })
+    renderWorkspace(
+      sessionClient({
+        createSession,
+      }),
+    )
+    await openSupportSession(user)
+    expect(await screen.findByText('Please send the file')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    expect(await screen.findByText('Choose a conversation or start a new chat.')).toBeInTheDocument()
+    expect(screen.queryByText('Please send the file')).not.toBeInTheDocument()
+    expect(createSession).not.toHaveBeenCalled()
+  })
+
+  it('shows an access card when the account cannot list agents', async () => {
+    renderWorkspace(
+      createClient({
+        listAgents: async () => {
+          throw new ApiError(403, 'Forbidden')
+        },
+      }),
+    )
+    expect(await screen.findByText("You don't have access yet")).toBeInTheDocument()
+    expect(screen.getByText(/Ask an admin to give you access/)).toBeInTheDocument()
+    expect(
+      screen.queryByText('You can view this agent, but you cannot run it.'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Message' })).not.toBeInTheDocument()
+  })
+
+  it('asks an admin for an agent when the account can sign in but none are available', async () => {
+    renderWorkspace(
+      createClient({
+        listAgents: async () => ({ items: [], next_cursor: null }),
+      }),
+    )
+    expect(await screen.findByText('No agents yet')).toBeInTheDocument()
+    expect(screen.getByText(/Ask an admin to add you to a group/)).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Message' })).not.toBeInTheDocument()
   })
 
   it('renders assistant markdown without injecting an HTML script', async () => {

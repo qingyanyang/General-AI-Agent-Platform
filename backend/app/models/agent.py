@@ -88,6 +88,9 @@ class Agent(Base):
     approval_tool_names: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, server_default=text("'[]'")
     )
+    knowledge_references: Mapped[list[dict[str, str]]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
     # Access audience / owning group (Issues 3–4). Effective when authorization_mode=audience.
     authorization_mode: Mapped[str] = mapped_column(
         String(32),

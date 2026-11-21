@@ -211,7 +211,7 @@ def test_leader_can_read_own_roster_but_not_write(
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_leader_cannot_access_other_group(
+def test_leader_can_read_other_group_details_without_manage_access(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
@@ -227,7 +227,22 @@ def test_leader_cannot_access_other_group(
         PERM_AGENTS_EXECUTE,
     )
     try:
-        assert api_client.get(f"/groups/{group_b}", headers=headers(LEADER)).status_code == 404
+        listed = api_client.get("/groups", headers=headers(LEADER))
+        assert listed.status_code == 200, listed.text
+        assert {item["id"]: item["designation"] for item in listed.json()["items"]} == {
+            group_a: "leader", group_b: None,
+        }
+        detail = api_client.get(f"/groups/{group_b}", headers=headers(LEADER))
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["name"] == "Other"
+        assert detail.json()["description"] == "ops group"
+        assert detail.json()["designation"] is None
+        assert api_client.patch(
+            f"/groups/{group_b}", json={"name": "Renamed"}, headers=headers(LEADER),
+        ).status_code == 403
+        assert api_client.get(
+            f"/groups/{group_b}/agents", headers=headers(LEADER),
+        ).status_code == 404
         assert (
             api_client.get(
                 f"/groups/{group_b}/memberships",
@@ -254,13 +269,15 @@ def test_leader_cannot_access_other_group(
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_member_reads_own_group_but_not_roster(
+def test_member_reads_own_group_and_roster(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
-    _seed_directory(db_session, ADMIN, MEMBER)
+    _seed_directory(db_session, ADMIN, MEMBER, LEADER)
     group_id = _create_group(api_client)
     _put_membership(api_client, group_id, MEMBER, GroupDesignation.MEMBER.value)
+
+    _put_membership(api_client, group_id, LEADER, GroupDesignation.LEADER.value)
 
     api_client.app.dependency_overrides[get_current_user] = _as_user(
         MEMBER,
@@ -276,7 +293,16 @@ def test_member_reads_own_group_but_not_roster(
             f"/groups/{group_id}/memberships",
             headers=headers(MEMBER),
         )
-        assert roster.status_code == 403, roster.text
+        assert roster.status_code == 200, roster.text
+        assert {
+            item["user_id"]: item["designation"] for item in roster.json()["items"]
+        } == {LEADER: "leader", MEMBER: "member"}
+
+        remove = api_client.delete(
+            f"/groups/{group_id}/memberships/{LEADER}",
+            headers=headers(MEMBER),
+        )
+        assert remove.status_code == 403, remove.text
     finally:
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
@@ -523,7 +549,6 @@ def test_service_rejects_invalid_cursor(db_session: Session) -> None:
         groups_service.list_groups_for_caller(
             db_session,
             caller_user_id=ADMIN,
-            permissions={PERM_AGENT_ACCESS_MANAGE},
             limit=10,
             cursor="not-a-cursor",
         )
