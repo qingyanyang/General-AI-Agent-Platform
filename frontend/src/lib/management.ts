@@ -163,7 +163,52 @@ export type ExecutionSummary = {
   by_status: Record<string, number>
 }
 
-export type ExecutionUsagePage = ExecutionPage & {
+export type UsageCompleteness = 'not_captured' | 'unknown' | 'partial' | 'complete'
+
+export type RunTokens = {
+  completeness: UsageCompleteness
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+}
+
+export type EstimatedModelCost = {
+  completeness: UsageCompleteness
+  totals: { currency: string; amount: string }[]
+}
+
+export type RunUsage = ExecutionRecord & {
+  models: { provider: string; model: string }[]
+  tokens: RunTokens
+  estimated_model_cost: EstimatedModelCost
+}
+
+type ToolCallUsage = {
+  id: string
+  name: string
+  status: string
+  started_at: string
+  duration_ms: number | null
+}
+
+type ModelCallUsage = Omit<ToolCallUsage, 'name'> & {
+  provider: string
+  requested_model: string
+  reported_model: string | null
+  tokens: RunTokens
+  cached_input_tokens: number | null
+  cache_write_tokens: number | null
+  estimated_model_cost: EstimatedModelCost
+}
+
+export type RunUsageDetail = RunUsage & {
+  model_calls: ModelCallUsage[]
+  tool_calls: ToolCallUsage[]
+}
+
+export type ExecutionUsagePage = {
+  items: RunUsage[]
+  next_cursor: string | null
   summary: ExecutionSummary
 }
 
@@ -286,6 +331,7 @@ export interface ManagementClient {
     userId: string,
     query?: ExecutionQuery & { from?: string; to?: string },
   ): Promise<ExecutionUsagePage>
+  getUserExecutionUsage(userId: string, executionId: string): Promise<RunUsageDetail>
   inviteUser(body: {
     email: string
     role: DirectoryRole
@@ -483,6 +529,116 @@ function parseExecutionPage(value: unknown): ExecutionPage {
   return {
     items: value.items.map(parseExecution),
     next_cursor: parseCursor(value.next_cursor),
+  }
+}
+
+function usageCompleteness(value: unknown): UsageCompleteness {
+  if (value === 'not_captured' || value === 'unknown' || value === 'partial' || value === 'complete') {
+    return value
+  }
+  throw unexpectedResponse()
+}
+
+function optionalUsageCount(value: unknown): number | null {
+  if (value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0)) {
+    return value
+  }
+  throw unexpectedResponse()
+}
+
+function parseRunTokens(value: unknown): RunTokens {
+  if (!isRecord(value)) {
+    throw unexpectedResponse()
+  }
+  return {
+    completeness: usageCompleteness(value.completeness),
+    input_tokens: optionalUsageCount(value.input_tokens),
+    output_tokens: optionalUsageCount(value.output_tokens),
+    total_tokens: optionalUsageCount(value.total_tokens),
+  }
+}
+
+function parseEstimatedModelCost(value: unknown): EstimatedModelCost {
+  if (!isRecord(value) || !Array.isArray(value.totals)) {
+    throw unexpectedResponse()
+  }
+  const totals = value.totals.map((entry: unknown) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.currency !== 'string' || !/^[A-Z]{3}$/.test(entry.currency) ||
+      typeof entry.amount !== 'string' || !/^\d+(?:\.\d+)?$/.test(entry.amount)
+    ) {
+      throw unexpectedResponse()
+    }
+    return { currency: entry.currency, amount: entry.amount }
+  })
+  return { completeness: usageCompleteness(value.completeness), totals }
+}
+
+function parseRunUsage(value: unknown): RunUsage {
+  if (!isRecord(value) || !Array.isArray(value.models)) {
+    throw unexpectedResponse()
+  }
+  return {
+    ...parseExecution(value),
+    models: value.models.map((model: unknown) => {
+      if (!isRecord(model) || typeof model.provider !== 'string' || typeof model.model !== 'string') {
+        throw unexpectedResponse()
+      }
+      return { provider: model.provider, model: model.model }
+    }),
+    tokens: parseRunTokens(value.tokens),
+    estimated_model_cost: parseEstimatedModelCost(value.estimated_model_cost),
+  }
+}
+
+function parseCallTiming(value: Record<string, unknown>) {
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.status !== 'string' ||
+    typeof value.started_at !== 'string'
+  ) {
+    throw unexpectedResponse()
+  }
+  return {
+    id: value.id,
+    status: value.status,
+    started_at: value.started_at,
+    duration_ms: optionalUsageCount(value.duration_ms),
+  }
+}
+
+function parseRunUsageDetail(value: unknown): RunUsageDetail {
+  if (!isRecord(value) || !Array.isArray(value.model_calls) || !Array.isArray(value.tool_calls)) {
+    throw unexpectedResponse()
+  }
+  return {
+    ...parseRunUsage(value),
+    model_calls: value.model_calls.map((call: unknown) => {
+      if (
+        !isRecord(call) || typeof call.provider !== 'string' ||
+        typeof call.requested_model !== 'string' ||
+        !(typeof call.reported_model === 'string' || call.reported_model === null)
+      ) {
+        throw unexpectedResponse()
+      }
+      return {
+        ...parseCallTiming(call),
+        provider: call.provider,
+        requested_model: call.requested_model,
+        reported_model: call.reported_model,
+        tokens: parseRunTokens(call.tokens),
+        cached_input_tokens: optionalUsageCount(call.cached_input_tokens),
+        cache_write_tokens: optionalUsageCount(call.cache_write_tokens),
+        estimated_model_cost: parseEstimatedModelCost(call.estimated_model_cost),
+      }
+    }),
+    tool_calls: value.tool_calls.map((call: unknown) => {
+      if (!isRecord(call) || typeof call.name !== 'string') {
+        throw unexpectedResponse()
+      }
+      return { ...parseCallTiming(call), name: call.name }
+    }),
   }
 }
 
@@ -1027,8 +1183,10 @@ export function createManagementClient(
         `/users/${encodeURIComponent(userId)}/executions?${pageQuery(query.cursor, extra)}`,
       )
       const body = await readJson(response)
-      const page = parseExecutionPage(body)
-      if (!isRecord(body) || !isRecord(body.summary) || typeof body.summary.total !== 'number') {
+      if (
+        !isRecord(body) || !Array.isArray(body.items) ||
+        !isRecord(body.summary) || typeof body.summary.total !== 'number'
+      ) {
         throw unexpectedResponse()
       }
       const byStatus = body.summary.by_status
@@ -1042,7 +1200,17 @@ export function createManagementClient(
         }
         by_status[key] = count
       }
-      return { ...page, summary: { total: body.summary.total, by_status } }
+      return {
+        items: body.items.map(parseRunUsage),
+        next_cursor: parseCursor(body.next_cursor),
+        summary: { total: body.summary.total, by_status },
+      }
+    },
+    async getUserExecutionUsage(userId, executionId) {
+      const response = await authorizedFetch(
+        `/users/${encodeURIComponent(userId)}/executions/${encodeURIComponent(executionId)}`,
+      )
+      return parseRunUsageDetail(await readJson(response))
     },
     async inviteUser(body) {
       const response = await authorizedFetch('/users/invitations', {

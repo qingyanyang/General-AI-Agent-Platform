@@ -13,7 +13,11 @@ from app.api.deps import require_permissions
 from app.core.auth import AuthenticatedUser
 from app.core.database import get_db
 from app.core.permissions import PERM_AGENT_ACCESS_MANAGE
-from app.schemas.agent_execution import ExecutionOut, ExecutionSummaryOut, ExecutionUsageOut
+from app.schemas.agent_execution import (
+    ExecutionSummaryOut,
+    ExecutionUsageDetailOut,
+    ExecutionUsageOut,
+)
 from app.schemas.users import (
     AccessSourceOut,
     DirectoryUserOut,
@@ -27,7 +31,7 @@ from app.schemas.users import (
     UserUpdate,
 )
 from app.services import agent_executions as execution_service
-from app.services import user_admin
+from app.services import execution_usage, user_admin
 from app.services.auth0_management import (
     Auth0NotConfigured,
     open_auth0_directory,
@@ -86,7 +90,9 @@ def invite_user(
     except user_admin.UserAdminError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except GroupNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found") from None
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found",
+        ) from None
     finally:
         directory.close()
     return DirectoryUserOut.model_validate(row)
@@ -185,7 +191,9 @@ def list_user_executions(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     allowed = {"running", "awaiting_approval", "succeeded", "failed", "cancelled"}
     if status_filter is not None and status_filter not in allowed:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown status")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown status",
+        )
     cleaned_agent = agent_id.strip() if agent_id else None
     page = execution_service.list_owned_executions(
         db,
@@ -206,7 +214,23 @@ def list_user_executions(
         started_to=started_to,
     )
     return ExecutionUsageOut(
-        items=[ExecutionOut.model_validate(item) for item in page.items],
+        items=execution_usage.list_usage(db, page.items),
         next_cursor=page.next_cursor,
         summary=ExecutionSummaryOut(total=sum(counts.values()), by_status=counts),
     )
+
+@router.get("/{user_id}/executions/{execution_id}", response_model=ExecutionUsageDetailOut)
+def get_user_execution_usage(
+    user_id: str,
+    execution_id: uuid.UUID,
+    caller: Annotated[AuthenticatedUser, Depends(require_permissions(PERM_AGENT_ACCESS_MANAGE))],
+    db: Annotated[Session, Depends(get_db)],
+) -> ExecutionUsageDetailOut:
+    try:
+        user_admin.get_visible_user(db, user_id, permissions=caller.permissions)
+    except user_admin.UserAdminError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    execution = execution_service.get_owned_execution(
+        db, user_id=user_id, execution_id=execution_id,
+    )
+    return execution_usage.usage_detail(db, execution)

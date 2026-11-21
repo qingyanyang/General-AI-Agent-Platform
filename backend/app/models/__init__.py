@@ -7,6 +7,7 @@ from app.models.agent_group_assignment import AgentGroupAssignment
 from app.models.agent_instruction_skill import AgentInstructionSkill
 from app.models.chat_session import ChatSession
 from app.models.directory_user import DirectoryUser
+from app.models.execution_usage import ExecutionModelCall, ExecutionToolCall
 from app.models.group import Group, GroupMembership
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "AgentInstructionSkill",
     "ChatSession",
     "DirectoryUser",
+    "ExecutionModelCall",
+    "ExecutionToolCall",
     "Group",
     "GroupMembership",
 ]

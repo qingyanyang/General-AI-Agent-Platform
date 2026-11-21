@@ -115,7 +115,8 @@ def test_create_chat_model_deepseek_defaults(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "deepseek")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.delenv("LLM_MODEL", raising=False)
-    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", DEEPSEEK_BASE_URL)
+    monkeypatch.delenv("LLM_STREAM_USAGE", raising=False)
     get_settings.cache_clear()
 
     captured: dict[str, object] = {}
@@ -124,13 +125,14 @@ def test_create_chat_model_deepseek_defaults(monkeypatch: MonkeyPatch) -> None:
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr("app.agents.graph.ChatOpenAI", fake_chat_openai)
+    monkeypatch.setattr("app.agents.graph.UsageChatOpenAI", fake_chat_openai)
     create_chat_model()
 
     assert captured["api_key"] == "test-key"
     assert captured["base_url"] == DEEPSEEK_BASE_URL
     assert captured["model"] == DEEPSEEK_DEFAULT_MODEL
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert captured["stream_usage"] is True
     get_settings.cache_clear()
 
 
@@ -148,8 +150,10 @@ def test_create_chat_model_deepseek_respects_explicit_model(
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr("app.agents.graph.ChatOpenAI", fake_chat_openai)
+    monkeypatch.setenv("LLM_STREAM_USAGE", "false")
+    monkeypatch.setattr("app.agents.graph.UsageChatOpenAI", fake_chat_openai)
     create_chat_model()
 
     assert captured["model"] == "deepseek-v4-pro"
+    assert captured["stream_usage"] is False
     get_settings.cache_clear()

@@ -120,6 +120,7 @@ function createClient(overrides: Partial<ManagementClient> = {}): ManagementClie
     getUser: unused,
     listUserAccess: unused,
     listUserExecutions: unused,
+    getUserExecutionUsage: unused,
     inviteUser: unused,
     updateUser: unused,
     listTools: async () => [{ name: 'echo', description: 'Echo' }],

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from contextlib import nullcontext
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -27,6 +30,8 @@ from app.agents.tools import (
     ToolValidationError,
     create_default_registry,
 )
+from app.agents.usage import active_usage
+from app.agents.usage_chat_model import UsageChatOpenAI
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -94,7 +99,16 @@ def create_chat_model_for_agent(
     elif base_url:
         kwargs["base_url"] = base_url
 
-    return ChatOpenAI(**kwargs)
+    if settings.llm_stream_usage is not None:
+        kwargs["stream_usage"] = settings.llm_stream_usage
+    elif normalized == "deepseek" and (base_url or DEEPSEEK_BASE_URL).rstrip("/") in {
+        DEEPSEEK_BASE_URL,
+        f"{DEEPSEEK_BASE_URL}/v1",
+    }:
+        kwargs["stream_usage"] = True
+    elif normalized == "openai" and base_url and base_url.rstrip("/") == "https://api.openai.com/v1":
+        kwargs["stream_usage"] = True
+    return UsageChatOpenAI(**kwargs)
 
 
 def create_chat_model() -> ChatOpenAI:
@@ -181,11 +195,16 @@ async def _execute_registered_tools(
 
     context = get_tool_auth_context()
     outputs: list[ToolMessage] = []
-    for item in batch:
+    usage = active_usage.get()
+    for index, item in enumerate(batch):
         name = str(item["name"])
         call_id = str(item["tool_call_id"])
         args = dict(item["arguments"])
+        usage_name = name if registry.has(name) else "unknown"
+        usage_key = f"{state['messages'][-1].id or call_id}:{index}"
         if item["requires_approval"] and not pausable:
+            if usage is not None:
+                await usage.record_tool(usage_key, usage_name, "skipped")
             outputs.append(
                 ToolMessage(
                     content=_APPROVAL_UNAVAILABLE.format(name=name),
@@ -195,6 +214,8 @@ async def _execute_registered_tools(
             )
             continue
         if item["requires_approval"] and decisions.get(call_id) != "approve":
+            if usage is not None:
+                await usage.record_tool(usage_key, usage_name, "rejected")
             outputs.append(
                 ToolMessage(
                     content=_REJECTED_CONTENT,
@@ -203,7 +224,26 @@ async def _execute_registered_tools(
                 )
             )
             continue
-        outputs.append(await _invoke_tool(registry, name, call_id, args, context))
+        if usage is None:
+            outputs.append(await _invoke_tool(registry, name, call_id, args, context))
+            continue
+        started_at = datetime.now(UTC)
+        timer = time.monotonic()
+        status = "failed"
+        try:
+            await usage.record_tool(usage_key, usage_name, "running", started_at=started_at)
+            timer = time.monotonic()
+            message = await _invoke_tool(registry, name, call_id, args, context)
+            status = "failed" if message.status == "error" else "succeeded"
+            outputs.append(message)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        finally:
+            await usage.record_tool(
+                usage_key, usage_name, status, started_at=started_at,
+                duration_ms=int((time.monotonic() - timer) * 1000),
+            )
     return {"messages": outputs, "approval_batch": []}
 
 
@@ -217,6 +257,7 @@ async def _invoke_tool(
     if not registry.has(name):
         return ToolMessage(
             content=f"Error: tool '{name}' is not registered and cannot be executed",
+            status="error",
             tool_call_id=call_id,
             name=name or "unknown",
         )
@@ -233,12 +274,14 @@ async def _invoke_tool(
         )
         return ToolMessage(
             content=_AUTH_DENIED_CONTENT.format(name=name),
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
     except ToolNotRegisteredError:
         return ToolMessage(
             content=f"Error: tool '{name}' is not registered and cannot be executed",
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
@@ -246,6 +289,7 @@ async def _invoke_tool(
         logger.info("Tool argument validation failed for %s: %s", name, exc)
         return ToolMessage(
             content=f"Validation error for tool '{name}': {exc}",
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
@@ -253,6 +297,7 @@ async def _invoke_tool(
         logger.info("Tool connection failed for %s", name)
         return ToolMessage(
             content=_CONNECTION_ERROR_CONTENT.format(name=name),
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
@@ -260,6 +305,7 @@ async def _invoke_tool(
         logger.info("Tool execution failed for %s", name)
         return ToolMessage(
             content=_EXECUTION_ERROR_CONTENT.format(name=name),
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
@@ -267,6 +313,7 @@ async def _invoke_tool(
         logger.exception("Tool execution failed for %s", name)
         return ToolMessage(
             content=f"Tool execution error for '{name}'",
+            status="error",
             tool_call_id=call_id,
             name=name,
         )
@@ -341,8 +388,10 @@ def build_agent_graph(
         _note_inflight_task()
         model_input = _messages_for_model(list(state["messages"]), prompt)
         merged = None
-        async for chunk in model_with_tools.astream(model_input):
-            merged = chunk if merged is None else merged + chunk
+        usage = active_usage.get()
+        async with usage.model_call() if usage is not None else nullcontext():
+            async for chunk in model_with_tools.astream(model_input):
+                merged = chunk if merged is None else merged + chunk
         if merged is None:
             return {"messages": [AIMessage(content="")]}
         return {"messages": [merged]}
@@ -357,7 +406,16 @@ def build_agent_graph(
 
     async def freeze_node(state: AgentState) -> dict:
         _note_inflight_task()
-        return _freeze_tool_batch(state, approvals)
+        batch = _freeze_tool_batch(state, approvals)
+        usage = active_usage.get()
+        if usage is not None:
+            for index, item in enumerate(batch.get("approval_batch", [])):
+                name = item["name"]
+                key = f"{state['messages'][-1].id or item['tool_call_id']}:{index}"
+                await usage.record_tool(
+                    key, name if tool_registry.has(name) else "unknown", "pending",
+                )
+        return batch
 
     graph = StateGraph(AgentState)
     graph.add_node("llm", llm_node)

@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.agent_execution import AgentExecution, AgentExecutionStatus
+from app.models.execution_usage import ExecutionToolCall
 from app.services.session_gates import claim_idle, release_running_gate
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ def start_execution(
         duration_ms=None,
         error_summary=None,
         langsmith_run_id=str(execution_id),
+        usage_capture="pending",
     )
     db.add(row)
     db.flush()
@@ -166,6 +168,17 @@ def finalize_execution(
         )
     )
     updated = bool(result.rowcount)
+    if updated:
+        db.execute(
+            update(ExecutionToolCall)
+            .where(
+                ExecutionToolCall.execution_id == execution_id,
+                ExecutionToolCall.status == "pending",
+            )
+            .values(
+                status="cancelled" if status == AgentExecutionStatus.CANCELLED.value else "skipped",
+            ),
+        )
     if updated and session_id is not None:
         release_running_gate(db, session_id=session_id, execution_id=execution_id)
     db.commit()
@@ -274,4 +287,4 @@ def summarize_executions(
         stmt = stmt.where(AgentExecution.started_at >= started_from)
     if started_to is not None:
         stmt = stmt.where(AgentExecution.started_at <= started_to)
-    return {status_name: count for status_name, count in db.execute(stmt.group_by(AgentExecution.status)).all()}
+    return dict(db.execute(stmt.group_by(AgentExecution.status)).tuples().all())

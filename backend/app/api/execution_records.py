@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.agents.usage import UsageRecorder, active_usage
 from app.core.database import get_db
 from app.models.agent_execution import AgentExecutionStatus
 from app.services import agent_executions as execution_service
@@ -37,6 +38,23 @@ def request_db_session(request: Request) -> Iterator[Session]:
         yield session
     finally:
         generator.close()
+
+
+@asynccontextmanager
+async def capture_execution_usage(
+    request: Request, execution_id: uuid.UUID, *, provider: str, model: str, resumed: bool = False,
+) -> AsyncIterator[None]:
+    recorder = UsageRecorder(
+        lambda: request_db_session(request), execution_id=execution_id,
+        provider=provider, model=model,
+    )
+    token = active_usage.set(recorder)
+    try:
+        await recorder.begin(resumed=resumed)
+        yield
+    finally:
+        active_usage.reset(token)
+        await recorder.finish()
 
 
 def start_execution_or_503(

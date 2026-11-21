@@ -286,6 +286,67 @@ Rows store metadata only (ids, status, timestamps, `duration_ms`, sanitized `err
 
 Failed initial insert → **503** and the model is never invoked. Finalization failures are logged and do not turn a successful reply into an error response.
 
+### Per-run Usage and estimated model cost
+
+Open **Users → a user → Usage** as an Admin or Super Admin. The paginated list reports
+active duration, each run’s models and token totals, and estimated model cost per
+currency. Opening a run shows model calls and tool statuses and durations.
+`GET /users/{user_id}/executions/{execution_id}` applies the same directory visibility
+and `agent-access:manage` checks as the list and verifies the run belongs to that user.
+The existing owner-only `/executions` endpoints retain their existing contract.
+
+Usage records store counts, timing, safe identifiers, and pricing metadata. They contain
+no request excerpts, prompts, provider responses, tool arguments, tool results, or credentials.
+Pre-migration runs display **Usage not captured**. Unknown and partial tokens and costs
+are marked independently. A run can have complete tokens even if it failed or if rates
+were unavailable. Approval checkpoints retain the same execution ID. Active duration
+continues to exclude time spent waiting for approval.
+
+Set `LLM_RATE_CATALOG` to a JSON array in the backend environment. Rates are decimal
+strings per million tokens. This template shows the fields. Replace each uppercase
+placeholder with your approved value before setting it.
+
+```json
+[
+  {
+    "provider": "openai",
+    "model": "REQUESTED_MODEL",
+    "reported_models": ["APPROVED_REPORTED_MODEL_VERSION"],
+    "currency": "USD",
+    "source": "PUBLIC_PRICE_SOURCE",
+    "effective_from": "YYYY-MM-DD",
+    "input_per_million": "INPUT_RATE",
+    "output_per_million": "OUTPUT_RATE",
+    "cache_pricing": "separate",
+    "cached_input_per_million": "CACHED_INPUT_RATE"
+  }
+]
+```
+
+Use one rate per requested provider/model pair. `reported_models` is optional and allows
+provider-reported model aliases whose prices you have verified match the configured rate.
+Use `cache_pricing: "flat"` only when input costs the same regardless of caching. For
+separate cache rates, provide the applicable cached input price and, if relevant,
+`cache_write_per_million`. Missing required rates or cache counts produce Unknown cost.
+The catalog describes the current rates. `effective_from` identifies the snapshot and
+does not schedule price changes. Restart the backend after editing the catalog. Each call
+snapshots its rate at dispatch and older estimates are never repriced. Requests reported
+under an unsupported service tier or a different, unapproved model version have unknown cost.
+
+The installed Chat Completions integration captures usage directly from OpenAI and
+DeepSeek responses, independent of LangSmith. Native streaming usage is requested for
+the default endpoints. Set `LLM_STREAM_USAGE=true` for a custom endpoint only after
+confirming that it accepts `stream_options.include_usage`. An interrupted stream may
+omit usage for its final call. Estimates cover captured provider usage and can exclude
+unreported SDK retry charges. They exclude tool and infrastructure charges. Provider
+invoices remain authoritative.
+
+To verify on a disposable development database, upgrade to revision
+`20261121_0015`, start the API and frontend, submit a new chat run, then open that
+user's Usage tab. Check a tool-using run for multiple model calls and an approval run
+before and after resuming. Remove rates and restart to verify that new costs show
+Unknown while prior estimates stay fixed. No historical backfill is performed.
+
 ### Migrations
 
 Alembic creates the schema **before** the version table (`alembic/env.py`), then applies revisions:
