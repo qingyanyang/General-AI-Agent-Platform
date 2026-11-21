@@ -37,3 +37,12 @@ class ExecutionOut(BaseModel):
 class ExecutionListOut(BaseModel):
     items: list[ExecutionOut]
     next_cursor: str | None = None
+
+
+class ExecutionSummaryOut(BaseModel):
+    total: int
+    by_status: dict[str, int]
+
+
+class ExecutionUsageOut(ExecutionListOut):
+    summary: ExecutionSummaryOut

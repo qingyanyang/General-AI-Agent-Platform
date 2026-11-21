@@ -95,6 +95,20 @@ param auth0Domain string = ''
 @description('Auth0 API audience. Empty omits AUTH0_AUDIENCE.')
 param auth0Audience string = ''
 
+@description('Auth0 Management API client id for invites. Used only when enableAuth0Management is true.')
+@secure()
+param auth0MgmtClientId string = ''
+
+@description('Auth0 Management API client secret for invites. Used only when enableAuth0Management is true.')
+@secure()
+param auth0MgmtClientSecret string = ''
+
+@description('When true, set AUTH0_MGMT_CLIENT_ID / AUTH0_MGMT_CLIENT_SECRET. Gate on bool, not empty(secure).')
+param enableAuth0Management bool = false
+
+@description('Auth0 database connection used when creating invited password users.')
+param auth0DbConnection string = 'Username-Password-Authentication'
+
 @description('Resource tags.')
 param tags object = {}
 
@@ -117,6 +131,13 @@ var langsmithSecret = enableLangsmithTracing ? [
   {
     name: 'langsmith-api-key'
     value: langsmithApiKey
+  }
+] : []
+
+var auth0MgmtSecret = enableAuth0Management ? [
+  {
+    name: 'auth0-mgmt-client-secret'
+    value: auth0MgmtClientSecret
   }
 ] : []
 
@@ -203,7 +224,25 @@ var auth0AudienceEnv = empty(auth0Audience) ? [] : [
   }
 ]
 
-var authEnv = concat(auth0DomainEnv, auth0AudienceEnv)
+var auth0DbConnectionEnv = empty(auth0DbConnection) ? [] : [
+  {
+    name: 'AUTH0_DB_CONNECTION'
+    value: auth0DbConnection
+  }
+]
+
+var auth0MgmtEnv = enableAuth0Management ? [
+  {
+    name: 'AUTH0_MGMT_CLIENT_ID'
+    value: auth0MgmtClientId
+  }
+  {
+    name: 'AUTH0_MGMT_CLIENT_SECRET'
+    secretRef: 'auth0-mgmt-client-secret'
+  }
+] : []
+
+var authEnv = concat(auth0DomainEnv, auth0AudienceEnv, auth0DbConnectionEnv, auth0MgmtEnv)
 
 // Project name is not set here — FastAPI defaults to agent-platform-{ENVIRONMENT}.
 var langsmithEnv = enableLangsmithTracing ? concat(
@@ -253,7 +292,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      secrets: concat(databaseSecret, llmSecret, langsmithSecret)
+      secrets: concat(databaseSecret, llmSecret, langsmithSecret, auth0MgmtSecret)
     }
     template: {
       containers: [

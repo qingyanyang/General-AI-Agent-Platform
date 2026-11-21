@@ -8,6 +8,8 @@ set -euo pipefail
 #      export DATABASE_URL='postgresql+psycopg://...'
 #      export LLM_API_KEY='...'         # optional
 #      export LANGSMITH_API_KEY='...'   # optional tracing
+#      export AUTH0_MGMT_CLIENT_ID='...'     # optional invites
+#      export AUTH0_MGMT_CLIENT_SECRET='...' # optional invites
 # 4. bash scripts/infra/deploy.sh
 
 RG="rg-agent-platform-demo"
@@ -79,6 +81,12 @@ fi
 if [[ -n "${LANGSMITH_API_KEY:-}" ]]; then
   EXTRA_PARAMS+=(--parameters "langsmithApiKey=${LANGSMITH_API_KEY}")
   EXTRA_PARAMS+=(--parameters "enableLangsmithTracing=true")
+fi
+
+if [[ -n "${AUTH0_MGMT_CLIENT_ID:-}" && -n "${AUTH0_MGMT_CLIENT_SECRET:-}" ]]; then
+  EXTRA_PARAMS+=(--parameters "auth0MgmtClientId=${AUTH0_MGMT_CLIENT_ID}")
+  EXTRA_PARAMS+=(--parameters "auth0MgmtClientSecret=${AUTH0_MGMT_CLIENT_SECRET}")
+  EXTRA_PARAMS+=(--parameters "enableAuth0Management=true")
 fi
 
 # --------------------------------------------------

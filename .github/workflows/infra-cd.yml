@@ -71,6 +71,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_CLIENT_SECRET }}
         run: |
           set -euo pipefail
 
@@ -81,6 +83,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_CLIENT_SECRET }}
         run: |
           set -euo pipefail
 
@@ -92,6 +96,11 @@ jobs:
           if [[ -n "${LANGSMITH_API_KEY:-}" ]]; then
             EXTRA_PARAMS+=(--parameters "langsmithApiKey=${LANGSMITH_API_KEY}")
             EXTRA_PARAMS+=(--parameters "enableLangsmithTracing=true")
+          fi
+          if [[ -n "${AUTH0_MGMT_CLIENT_ID:-}" && -n "${AUTH0_MGMT_CLIENT_SECRET:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "auth0MgmtClientId=${AUTH0_MGMT_CLIENT_ID}")
+            EXTRA_PARAMS+=(--parameters "auth0MgmtClientSecret=${AUTH0_MGMT_CLIENT_SECRET}")
+            EXTRA_PARAMS+=(--parameters "enableAuth0Management=true")
           fi
 
           az deployment group validate \
@@ -106,6 +115,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_CLIENT_SECRET }}
         run: |
           set -euo pipefail
 
@@ -121,6 +132,11 @@ jobs:
           if [[ -n "${LANGSMITH_API_KEY:-}" ]]; then
             EXTRA_PARAMS+=(--parameters "langsmithApiKey=${LANGSMITH_API_KEY}")
             EXTRA_PARAMS+=(--parameters "enableLangsmithTracing=true")
+          fi
+          if [[ -n "${AUTH0_MGMT_CLIENT_ID:-}" && -n "${AUTH0_MGMT_CLIENT_SECRET:-}" ]]; then
+            EXTRA_PARAMS+=(--parameters "auth0MgmtClientId=${AUTH0_MGMT_CLIENT_ID}")
+            EXTRA_PARAMS+=(--parameters "auth0MgmtClientSecret=${AUTH0_MGMT_CLIENT_SECRET}")
+            EXTRA_PARAMS+=(--parameters "enableAuth0Management=true")
           fi
 
           az deployment group create \

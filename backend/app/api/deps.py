@@ -37,6 +37,8 @@ _UNAVAILABLE = "Authentication is temporarily unavailable"
 _DIRECTORY_UNAVAILABLE = "Directory persistence is unavailable"
 _UNAUTHORIZED = "Not authenticated"
 _FORBIDDEN = "Permission denied"
+_EMAIL_UNVERIFIED = "Verify your email before continuing."
+_ACCOUNT_DISABLED = "This account is disabled."
 _UNAUTHORIZED_HEADERS = {"WWW-Authenticate": "Bearer"}
 
 
@@ -98,7 +100,8 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_NOT_CONFIGURED,
         ) from None
-    except AuthRejected:
+    except AuthRejected as exc:
+        logger.info("Auth0 token rejected: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=_UNAUTHORIZED,
@@ -109,14 +112,32 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_UNAVAILABLE,
         ) from None
+    if user.email_verified is False or (
+        settings.auth0_require_verified_email and user.email_verified is not True
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_EMAIL_UNVERIFIED,
+        )
     try:
-        await asyncio.to_thread(directory_users.record_authenticated_subject, user.user_id)
+        account_status = await asyncio.to_thread(
+            directory_users.record_authenticated_subject,
+            user.user_id,
+            email=user.email,
+            display_name=user.display_name,
+            email_verified=user.email_verified is True,
+        )
     except directory_users.DirectoryPersistenceError:
         logger.exception("Directory persistence failed after authentication")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_DIRECTORY_UNAVAILABLE,
         ) from None
+    if account_status == "disabled":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_ACCOUNT_DISABLED,
+        )
     return user
 
 

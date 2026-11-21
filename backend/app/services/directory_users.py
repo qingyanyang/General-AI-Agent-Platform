@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import case
+from sqlalchemy import case, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -42,6 +42,8 @@ def upsert_signed_in_user(session: Session, *, user_id: str, seen_at: datetime) 
         user_id=user_id,
         first_seen_at=seen_at,
         last_seen_at=seen_at,
+        email_verified=False,
+        status="active",
     )
     session.execute(
         statement.on_conflict_do_update(
@@ -59,13 +61,47 @@ def upsert_signed_in_user(session: Session, *, user_id: str, seen_at: datetime) 
     )
 
 
-def record_authenticated_subject(user_id: str) -> None:
+def _apply_verified_profile(
+    session: Session,
+    *,
+    user_id: str,
+    email: str | None,
+    display_name: str | None,
+    email_verified: bool,
+) -> str:
+    row = session.get(DirectoryUser, user_id)
+    if row is None:
+        raise DirectoryPersistenceError("directory row missing after upsert")
+    if email_verified and display_name:
+        row.display_name = display_name
+    if email_verified and email:
+        taken = session.scalar(
+            select(DirectoryUser.user_id).where(
+                DirectoryUser.email == email,
+                DirectoryUser.user_id != user_id,
+            ),
+        )
+        if taken is None:
+            row.email = email
+            row.email_verified = True
+    if row.status != "disabled" and email_verified:
+        row.status = "active"
+    return row.status
+
+
+def record_authenticated_subject(
+    user_id: str,
+    *,
+    email: str | None = None,
+    display_name: str | None = None,
+    email_verified: bool = False,
+) -> str:
     """Commit one directory upsert, then close the session.
 
     ``last_seen_at`` is this authenticated API request, not an interactive login.
     A later permission failure still leaves the committed row in place.
     Opening the session is part of the write: a failure there is also a
-    persistence error and must not reach the route.
+    persistence error and must not reach the route. Returns the account status.
     """
     try:
         session = open_directory_session()
@@ -75,7 +111,15 @@ def record_authenticated_subject(user_id: str) -> None:
         raise DirectoryPersistenceError("directory session unavailable") from exc
     try:
         upsert_signed_in_user(session, user_id=user_id, seen_at=_utcnow())
+        status = _apply_verified_profile(
+            session,
+            user_id=user_id,
+            email=email,
+            display_name=display_name,
+            email_verified=email_verified,
+        )
         session.commit()
+        return status
     except DirectoryPersistenceError:
         session.rollback()
         raise

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { AccessPanel } from '@/components/manage/access-panel'
 import { Button } from '@/components/ui/button'
+import { LoadingRows } from '@/components/ui/primitives'
 import { useManagement, type ConfigForm, type MetadataForm } from '@/components/manage/use-management'
 import {
   displayExecutionStatus,
@@ -365,7 +366,7 @@ export function ManagementPage({
             </p>
           ) : null}
           {page.listLoading && page.agents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Loading agents…</p>
+            <LoadingRows label="Loading agents" rows={3} />
           ) : null}
           {!page.listLoading && page.agents.length === 0 && !page.listError ? (
             <p className="text-sm text-muted-foreground">No agents to show.</p>
@@ -420,7 +421,7 @@ export function ManagementPage({
         </section>
       ) : null}
 
-      {page.agentLoading ? <p className="text-sm text-muted-foreground">Loading agent…</p> : null}
+      {page.agentLoading ? <LoadingRows label="Loading agent details" rows={3} /> : null}
       {page.agentError ? (
         <p className="text-sm" role="alert">
           {page.agentError}
@@ -567,7 +568,7 @@ export function ManagementPage({
               Load more grants
             </Button>
           ) : null}
-          {page.grantLoading ? <p className="text-sm text-muted-foreground">Loading grants…</p> : null}
+          {page.grantLoading ? <LoadingRows label="Loading access" rows={3} /> : null}
         </section>
       ) : null}
 

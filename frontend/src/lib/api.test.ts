@@ -95,10 +95,59 @@ describe('createChatClient', () => {
     expect(error).toMatchObject({ status: 409 })
   })
 
+  it('retries the agent list with a fresh token after an unauthorized response', async () => {
+    const getAccessToken = vi.fn().mockResolvedValueOnce('cached').mockResolvedValueOnce('fresh')
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Unauthorized' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ items: [agent], next_cursor: null }))
+
+    await expect(createChatClient(getAccessToken).listAgents('next')).resolves.toMatchObject({
+      items: [{ id: agent.id }],
+    })
+    expect(getAccessToken).toHaveBeenLastCalledWith('off')
+    expect(fetchMock.mock.calls[1][0]).toBe(fetchMock.mock.calls[0][0])
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Authorization')).toBe('Bearer fresh')
+  })
+
+  it.each([[401, 2], [403, 1]])(
+    'propagates an agent list %i after at most one retry',
+    async (status, expectedCalls) => {
+      fetchMock.mockImplementation(async () => jsonResponse({ detail: 'Access denied' }, status))
+
+      await expect(createChatClient(async () => 'token').listAgents()).rejects.toMatchObject({
+        status,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(expectedCalls)
+    },
+  )
+
   it('does not list an agent that the payload omitted', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ items: [agent], next_cursor: null }))
     const client = createChatClient(async () => 'token')
     const page = await client.listAgents()
     expect(page.items.map((item) => item.id)).toEqual(['support'])
+  })
+
+  it('creates a session with an optional title and archives by delete', async () => {
+    const client = createChatClient(async () => 'token')
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 's1',
+        user_id: 'u',
+        agent_id: 'support',
+        title: 'Hello there',
+        created_at: '',
+        last_activity_at: '',
+      }, 201),
+    )
+    await client.createSession('support', 'Hello there')
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ agent_id: 'support', title: 'Hello there' }),
+    )
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await client.deleteSession('s1')
+    expect(fetchMock.mock.calls[1][0]).toEqual(expect.stringContaining('/sessions/s1'))
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE')
   })
 })

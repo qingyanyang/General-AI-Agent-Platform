@@ -125,6 +125,12 @@ def test_directory_commit_does_not_commit_another_sessions_changes(tmp_path: Pat
 def test_record_commits_and_closes_only_the_directory_session(monkeypatch) -> None:
     events: list[object] = []
 
+    class _Row:
+        status = "active"
+        display_name = None
+        email = None
+        email_verified = False
+
     class _Session:
         def commit(self) -> None:
             events.append("commit")
@@ -134,6 +140,12 @@ def test_record_commits_and_closes_only_the_directory_session(monkeypatch) -> No
 
         def close(self) -> None:
             events.append("close")
+
+        def get(self, *_args: object, **_kwargs: object) -> _Row:
+            return _Row()
+
+        def scalar(self, *_args: object, **_kwargs: object) -> None:
+            return None
 
     directory_session = _Session()
 

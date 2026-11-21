@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isApiError } from '@/lib/errors'
+import {
+  cachedModels,
+  cachedSkills,
+  cachedTools,
+  readCachedConfiguration,
+  writeCachedConfiguration,
+} from '@/lib/read-cache'
 import type {
   AccessGrant,
   AgentConfiguration,
@@ -291,9 +298,12 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
           catalogError: null,
         }
       }
-      let configuration: AgentConfiguration
+      let configuration = readCachedConfiguration(id)
       try {
-        configuration = await client.getConfiguration(id)
+        if (!configuration) {
+          configuration = await client.getConfiguration(id)
+          writeCachedConfiguration(id, configuration)
+        }
       } catch (error) {
         if (isApiError(error) && error.status === 401) {
           throw error
@@ -316,10 +326,13 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         }
         throw error
       }
+      if (!configuration) {
+        throw new Error('Configuration was not loaded.')
+      }
       const [toolsOutcome, modelsOutcome, skillsOutcome] = await Promise.all([
-        settle(client.listTools()),
-        settle(client.listModels()),
-        settle(client.listSkills()),
+        settle(cachedTools(() => client.listTools())),
+        settle(cachedModels(() => client.listModels())),
+        settle(cachedSkills(() => client.listSkills())),
       ])
       for (const outcome of [toolsOutcome, modelsOutcome, skillsOutcome]) {
         if (outcome.error && isApiError(outcome.error) && outcome.error.status === 401) {
@@ -556,19 +569,19 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
   const saveConfiguration = useCallback(async () => {
     const current = detailRef.current
     if (!current?.configForm || !canTechnical) {
-      return
+      return false
     }
     let body: AgentConfiguration
     try {
       body = toConfiguration(current.configForm, current.models)
     } catch (error) {
       setConfigError(error instanceof Error ? error.message : 'Could not save configuration.')
-      return
+      return false
     }
     const id = current.id
     const ticket = openGeneration.current
     if (!isCurrentOpen(id, ticket)) {
-      return
+      return false
     }
     const saveTicket = configSaveTicket.current + 1
     configSaveTicket.current = saveTicket
@@ -577,8 +590,9 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
     setConfigError(null)
     try {
       const saved = await client.putConfiguration(id, body, signal)
+      writeCachedConfiguration(id, saved)
       if (signal.aborted || !isCurrentOpen(id, ticket)) {
-        return
+        return false
       }
       const form = configFromApi(saved)
       setDetail((previous) => {
@@ -587,6 +601,7 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         }
         return { ...previous, configForm: form, savedConfig: form }
       })
+      return true
     } catch (error) {
       if (
         signal.aborted ||
@@ -594,9 +609,10 @@ export function useManagement({ client, permissions, onUnauthorized }: Managemen
         !isCurrentOpen(id, ticket) ||
         reportUnauthorized(error)
       ) {
-        return
+        return false
       }
       setConfigError(errorMessage(error, 'Could not save configuration.'))
+      return false
     } finally {
       if (configSaveTicket.current === saveTicket) {
         setSavingConfig(false)

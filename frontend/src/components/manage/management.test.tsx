@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 
 import { ManagementPage } from '@/components/manage/management-page'
 import { ApiError } from '@/lib/errors'
+import { clearReadCache } from '@/lib/read-cache'
 import type {
   AgentConfiguration,
   AgentRecord,
@@ -99,8 +100,28 @@ function createClient(overrides: Partial<ManagementClient> = {}): ManagementClie
     getAccessConfig: unused,
     putAccessConfig: unused,
     activateAccessConfig: unused,
+    getInstructionSkills: unused,
+    putInstructionSkills: unused,
+    getKnowledgeReferences: unused,
+    putKnowledgeReferences: unused,
     listGroups: async () => ({ items: [], next_cursor: null }),
     listAllGroups: async () => [],
+    createGroup: unused,
+    getGroup: unused,
+    updateGroup: unused,
+    deleteGroup: unused,
+    listGroupAgents: unused,
+    assignGroupAgent: unused,
+    unassignGroupAgent: unused,
+    listMemberships: unused,
+    upsertMembership: unused,
+    deleteMembership: unused,
+    listUsers: unused,
+    getUser: unused,
+    listUserAccess: unused,
+    listUserExecutions: unused,
+    inviteUser: unused,
+    updateUser: unused,
     listTools: async () => [{ name: 'echo', description: 'Echo' }],
     listModels: async () => [model],
     listSkills: async () => [],
@@ -139,6 +160,10 @@ async function openListedAgent(user: ReturnType<typeof userEvent.setup>, name: s
 }
 
 describe('ManagementPage', () => {
+  beforeEach(() => {
+    clearReadCache()
+  })
+
   it('creates an agent and shows a conflict from the API', async () => {
     const user = userEvent.setup()
     const createAgent = vi
@@ -638,7 +663,7 @@ describe('ManagementPage', () => {
     expect(listTools).not.toHaveBeenCalled()
   })
 
-  it('disables activation while access settings are unsaved and preserves draft on failed save', async () => {
+  it('saves audience changes immediately and keeps the previous mode when save fails', async () => {
     const user = userEvent.setup()
     const alpha = agent('alpha', 'Alpha')
     const putAccessConfig = vi.fn(async () => {
@@ -664,17 +689,17 @@ describe('ManagementPage', () => {
         }),
         putAccessConfig,
         activateAccessConfig,
-        listAllGroups: async () => [{ id: 'g1', name: 'Ops', description: null }],
+        listAllGroups: async () => [
+          { id: 'g1', name: 'Ops', description: null, designation: null, member_count: 0, agent_count: 0 },
+        ],
       }),
       businessAdmin,
     )
     await user.click(await screen.findByRole('button', { name: /Alpha/ }))
     await screen.findByRole('heading', { name: 'Who can use this agent?' })
-    await user.click(screen.getByRole('checkbox', { name: 'Assign Ops' }))
-    expect(screen.getByRole('button', { name: 'Activate group-based access' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: 'Save access settings' }))
+    await user.click(screen.getByRole('radio', { name: 'Everyone in the company' }))
     expect(await screen.findByText('Cannot remove the owning group')).toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: 'Assign Ops' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Selected groups' })).toBeChecked()
     expect(activateAccessConfig).not.toHaveBeenCalled()
   })
 
@@ -762,20 +787,28 @@ describe('ManagementPage', () => {
     expect(await screen.findByRole('heading', { name: 'Access grants' })).toBeInTheDocument()
   })
 
-  it('closes activate confirmation when the access draft becomes dirty', async () => {
+  it('adds a group from the search dialog', async () => {
     const user = userEvent.setup()
     const alpha = agent('alpha', 'Alpha')
-    const activateAccessConfig = vi.fn(async () => {
-      throw new Error('should not activate')
-    })
+    const putAccessConfig = vi.fn(async () => ({
+      agent_id: 'alpha',
+      authorization_mode: 'audience' as const,
+      audience_effective: true,
+      audience_mode: 'groups' as const,
+      owning_group_id: null,
+      owning_group_name: null,
+      group_ids: ['g1'],
+      groups: [{ group_id: 'g1', name: 'Ops', is_owning: false }],
+      updated_at: '2026-01-01T00:00:00Z',
+    }))
     renderPage(
       createClient({
         listAgents: async () => ({ items: [alpha], next_cursor: null }),
         getAgent: async () => alpha,
         getAccessConfig: async () => ({
           agent_id: 'alpha',
-          authorization_mode: 'legacy_grants',
-          audience_effective: false,
+          authorization_mode: 'audience',
+          audience_effective: true,
           audience_mode: 'groups',
           owning_group_id: null,
           owning_group_name: null,
@@ -783,8 +816,11 @@ describe('ManagementPage', () => {
           groups: [],
           updated_at: '2026-01-01T00:00:00Z',
         }),
-        activateAccessConfig,
-        listAllGroups: async () => [{ id: 'g1', name: 'Ops', description: null }],
+        putAccessConfig,
+        listAllGroups: async () => [
+          { id: 'g1', name: 'Ops', description: null, designation: null, member_count: 0, agent_count: 0 },
+        ],
+        listMemberships: async () => ({ items: [], next_cursor: null }),
         listGrants: async () => ({ items: [], next_cursor: null }),
       }),
       accessAdmin,
@@ -792,12 +828,11 @@ describe('ManagementPage', () => {
 
     await user.click(await screen.findByRole('button', { name: /Alpha/ }))
     await screen.findByRole('heading', { name: 'Who can use this agent?' })
-    await user.click(screen.getByRole('button', { name: 'Activate group-based access' }))
-    expect(screen.getByRole('button', { name: 'Confirm activation' })).toBeEnabled()
-    await user.click(screen.getByRole('checkbox', { name: 'Assign Ops' }))
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Confirm activation' })).not.toBeInTheDocument()
-    })
-    expect(activateAccessConfig).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Add group' }))
+    await user.click(screen.getByRole('radio', { name: 'Ops' }))
+    const addButtons = screen.getAllByRole('button', { name: 'Add group' })
+    await user.click(addButtons[addButtons.length - 1])
+    expect(await screen.findByRole('link', { name: 'Ops' })).toBeInTheDocument()
+    expect(putAccessConfig).toHaveBeenCalled()
   })
 })

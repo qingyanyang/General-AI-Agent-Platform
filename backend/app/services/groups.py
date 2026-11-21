@@ -15,7 +15,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +23,14 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import USER_ID_MAX_LENGTH
 from app.core.permissions import PERM_AGENT_ACCESS_MANAGE
+from app.services.agent_access_config import (
+    AgentAccessConfigNotFound,
+    AgentAccessConfigValidationError,
+    get_access_config,
+    update_access_config,
+)
+from app.models.agent import Agent
+from app.models.agent_group_assignment import AgentGroupAssignment
 from app.models.directory_user import DirectoryUser
 from app.models.group import Group, GroupDesignation, GroupMembership
 from app.schemas.groups import GROUP_NAME_MAX_LENGTH
@@ -58,12 +66,21 @@ class GroupNameConflict(Exception):
 class GroupListItem:
     group: Group
     designation: str | None
+    member_count: int = 0
+    agent_count: int = 0
 
 
 @dataclass(frozen=True)
 class GroupPage:
     items: list[GroupListItem]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class GroupAgentAssignment:
+    agent_id: str
+    agent_name: str | None
+    is_owning: bool
 
 
 @dataclass(frozen=True)
@@ -184,73 +201,75 @@ def decode_membership_cursor(cursor: str) -> tuple[datetime, str]:
         raise GroupValidationError("Malformed pagination cursor") from exc
 
 
+def _group_counts(
+    db: Session,
+    group_ids: list[uuid.UUID],
+) -> tuple[dict[uuid.UUID, int], dict[uuid.UUID, int]]:
+    if not group_ids:
+        return {}, {}
+    members = {
+        group_id: count
+        for group_id, count in db.execute(
+            select(GroupMembership.group_id, func.count())
+            .where(GroupMembership.group_id.in_(group_ids))
+            .group_by(GroupMembership.group_id),
+        ).all()
+    }
+    agents = {
+        group_id: count
+        for group_id, count in db.execute(
+            select(AgentGroupAssignment.group_id, func.count())
+            .where(AgentGroupAssignment.group_id.in_(group_ids))
+            .group_by(AgentGroupAssignment.group_id),
+        ).all()
+    }
+    return members, agents
+
+
 def list_groups_for_caller(
     db: Session,
     *,
     caller_user_id: str,
-    permissions: Collection[str],
     limit: int,
     cursor: str | None,
 ) -> GroupPage:
-    if caller_is_manager(permissions):
-        stmt: Select[tuple[Group]] = select(Group).order_by(
-            Group.created_at.desc(),
-            Group.id.desc(),
-        )
-        if cursor is not None:
-            cursor_created, cursor_id = decode_group_cursor(cursor)
-            stmt = stmt.where(
-                (Group.created_at < cursor_created)
-                | ((Group.created_at == cursor_created) & (Group.id < cursor_id)),
-            )
-        rows = list(db.scalars(stmt.limit(limit + 1)).all())
-        next_cursor: str | None = None
-        if len(rows) > limit:
-            last = rows[limit - 1]
-            next_cursor = encode_group_cursor(last.created_at, last.id)
-            rows = rows[:limit]
-        memberships: dict[uuid.UUID, str] = {}
-        if rows:
-            memberships = {
-                row.group_id: row.designation
-                for row in db.scalars(
-                    select(GroupMembership).where(
-                        GroupMembership.user_id == caller_user_id,
-                        GroupMembership.group_id.in_([group.id for group in rows]),
-                    ),
-                ).all()
-            }
-        return GroupPage(
-            items=[
-                GroupListItem(group=group, designation=memberships.get(group.id)) for group in rows
-            ],
-            next_cursor=next_cursor,
-        )
-
-    stmt_join: Select[tuple[Group, str]] = (
-        select(Group, GroupMembership.designation)
-        .join(
-            GroupMembership,
-            GroupMembership.group_id == Group.id,
-        )
-        .where(GroupMembership.user_id == caller_user_id)
-        .order_by(Group.created_at.desc(), Group.id.desc())
+    stmt: Select[tuple[Group]] = select(Group).order_by(
+        Group.created_at.desc(),
+        Group.id.desc(),
     )
     if cursor is not None:
         cursor_created, cursor_id = decode_group_cursor(cursor)
-        stmt_join = stmt_join.where(
+        stmt = stmt.where(
             (Group.created_at < cursor_created)
             | ((Group.created_at == cursor_created) & (Group.id < cursor_id)),
         )
-    joined = list(db.execute(stmt_join.limit(limit + 1)).all())
-    next_cursor = None
-    if len(joined) > limit:
-        last_group, _ = joined[limit - 1]
-        next_cursor = encode_group_cursor(last_group.created_at, last_group.id)
-        joined = joined[:limit]
+    rows = list(db.scalars(stmt.limit(limit + 1)).all())
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        last = rows[limit - 1]
+        next_cursor = encode_group_cursor(last.created_at, last.id)
+        rows = rows[:limit]
+    memberships: dict[uuid.UUID, str] = {}
+    if rows:
+        memberships = {
+            row.group_id: row.designation
+            for row in db.scalars(
+                select(GroupMembership).where(
+                    GroupMembership.user_id == caller_user_id,
+                    GroupMembership.group_id.in_([group.id for group in rows]),
+                ),
+            ).all()
+        }
+    member_counts, agent_counts = _group_counts(db, [group.id for group in rows])
     return GroupPage(
         items=[
-            GroupListItem(group=group, designation=designation) for group, designation in joined
+            GroupListItem(
+                group=group,
+                designation=memberships.get(group.id),
+                member_count=member_counts.get(group.id, 0),
+                agent_count=agent_counts.get(group.id, 0),
+            )
+            for group in rows
         ],
         next_cursor=next_cursor,
     )
@@ -262,17 +281,51 @@ def get_group_for_caller(
     group_id: uuid.UUID,
     caller_user_id: str,
     permissions: Collection[str],
+    members_only: bool = False,
 ) -> GroupListItem:
     group = get_group(db, group_id)
     if group is None:
         raise GroupNotFound
     membership = get_membership(db, group_id=group_id, user_id=caller_user_id)
-    if membership is None and not caller_is_manager(permissions):
+    if members_only and membership is None and not caller_is_manager(permissions):
         raise GroupNotFound
+    member_counts, agent_counts = _group_counts(db, [group.id])
     return GroupListItem(
         group=group,
         designation=None if membership is None else membership.designation,
+        member_count=member_counts.get(group.id, 0),
+        agent_count=agent_counts.get(group.id, 0),
     )
+
+
+def list_group_agents_for_caller(
+    db: Session,
+    *,
+    group_id: uuid.UUID,
+    caller_user_id: str,
+    permissions: Collection[str],
+) -> list[GroupAgentAssignment]:
+    get_group_for_caller(
+        db,
+        group_id=group_id,
+        caller_user_id=caller_user_id,
+        permissions=permissions,
+        members_only=True,
+    )
+    rows = db.execute(
+        select(Agent.id, Agent.name, Agent.owning_group_id)
+        .join(AgentGroupAssignment, AgentGroupAssignment.agent_id == Agent.id)
+        .where(AgentGroupAssignment.group_id == group_id)
+        .order_by(Agent.name.asc(), Agent.id.asc()),
+    ).all()
+    return [
+        GroupAgentAssignment(
+            agent_id=agent_id,
+            agent_name=agent_name,
+            is_owning=owning_group_id == group_id,
+        )
+        for agent_id, agent_name, owning_group_id in rows
+    ]
 
 
 def list_memberships_for_caller(
@@ -284,17 +337,13 @@ def list_memberships_for_caller(
     limit: int,
     cursor: str | None,
 ) -> MembershipPage:
-    group = get_group(db, group_id)
-    if group is None:
-        raise GroupNotFound
-    membership = get_membership(db, group_id=group_id, user_id=caller_user_id)
-    is_manager = caller_is_manager(permissions)
-    if membership is None and not is_manager:
-        raise GroupNotFound
-    if not is_manager and (
-        membership is None or membership.designation != GroupDesignation.LEADER.value
-    ):
-        raise GroupAccessDenied
+    get_group_for_caller(
+        db,
+        group_id=group_id,
+        caller_user_id=caller_user_id,
+        permissions=permissions,
+        members_only=True,
+    )
 
     stmt: Select[tuple[GroupMembership]] = (
         select(GroupMembership)
@@ -412,3 +461,77 @@ def delete_membership(
         raise MembershipNotFound
     db.delete(membership)
     db.commit()
+
+
+def update_group(
+    db: Session,
+    *,
+    group_id: uuid.UUID,
+    name: str,
+    description: str | None,
+) -> Group:
+    group = get_group(db, group_id)
+    if group is None:
+        raise GroupNotFound
+    group.name = validate_group_name(name)
+    group.description = description
+    group.updated_at = _utcnow()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise GroupNameConflict("Group name already exists") from exc
+    db.refresh(group)
+    return group
+
+
+def delete_group(db: Session, *, group_id: uuid.UUID) -> None:
+    group = get_group(db, group_id)
+    if group is None:
+        raise GroupNotFound
+    db.delete(group)
+    db.commit()
+
+
+def assign_group_agent(db: Session, *, group_id: uuid.UUID, agent_id: str) -> None:
+    if get_group(db, group_id) is None:
+        raise GroupNotFound
+    try:
+        current = get_access_config(db, agent_id=agent_id)
+    except AgentAccessConfigNotFound as exc:
+        raise GroupValidationError("Agent not found") from exc
+    if group_id in current.group_ids:
+        return
+    mode = current.audience_mode or "groups"
+    try:
+        update_access_config(
+            db,
+            agent_id=agent_id,
+            audience_mode=mode,
+            owning_group_id=current.owning_group_id,
+            group_ids=[*current.group_ids, group_id],
+        )
+    except AgentAccessConfigValidationError as exc:
+        raise GroupValidationError(str(exc)) from exc
+
+
+def unassign_group_agent(db: Session, *, group_id: uuid.UUID, agent_id: str) -> None:
+    if get_group(db, group_id) is None:
+        raise GroupNotFound
+    try:
+        current = get_access_config(db, agent_id=agent_id)
+    except AgentAccessConfigNotFound as exc:
+        raise GroupValidationError("Agent not found") from exc
+    if group_id not in current.group_ids:
+        return
+    mode = current.audience_mode or "groups"
+    try:
+        update_access_config(
+            db,
+            agent_id=agent_id,
+            audience_mode=mode,
+            owning_group_id=current.owning_group_id,
+            group_ids=[item for item in current.group_ids if item != group_id],
+        )
+    except AgentAccessConfigValidationError as exc:
+        raise GroupValidationError(str(exc)) from exc

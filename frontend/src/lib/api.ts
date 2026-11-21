@@ -185,9 +185,15 @@ async function readJson(response: Response): Promise<unknown> {
   return (await response.json()) as unknown
 }
 
-export function createChatClient(getAccessToken: () => Promise<string>): ChatClient {
-  async function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const token = await getAccessToken()
+export function createChatClient(
+  getAccessToken: (cacheMode?: 'off') => Promise<string>,
+): ChatClient {
+  async function authorizedFetch(
+    path: string,
+    init: RequestInit = {},
+    cacheMode?: 'off',
+  ): Promise<Response> {
+    const token = await getAccessToken(cacheMode)
     const headers = new Headers(init.headers)
     headers.set('Authorization', `Bearer ${token}`)
     if (init.body !== undefined && !headers.has('Content-Type')) {
@@ -206,23 +212,40 @@ export function createChatClient(getAccessToken: () => Promise<string>): ChatCli
 
   return {
     async listAgents(cursor?: string) {
-      const response = await authorizedFetch(`/agents?${pageQuery(cursor)}`)
+      const path = `/agents?${pageQuery(cursor)}`
+      const response = await authorizedFetch(path)
+      if (response.status === 401) {
+        const retried = await authorizedFetch(path, {}, 'off')
+        return parseAgentList(await readJson(retried))
+      }
       return parseAgentList(await readJson(response))
     },
     async listSessions(cursor?: string) {
       const response = await authorizedFetch(`/sessions?${pageQuery(cursor)}`)
       return parseSessionList(await readJson(response))
     },
-    async createSession(agentId: string) {
+    async createSession(agentId: string, title?: string) {
+      const body: { agent_id: string; title?: string } = { agent_id: agentId }
+      if (title !== undefined) {
+        body.title = title
+      }
       const response = await authorizedFetch('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ agent_id: agentId }),
+        body: JSON.stringify(body),
       })
       const session = parseSession(await readJson(response))
       if (!session) {
         throw unexpectedResponse()
       }
       return session
+    },
+    async deleteSession(sessionId: string) {
+      const response = await authorizedFetch(`/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        throw await apiErrorFromResponse(response)
+      }
     },
     async listMessages(sessionId: string) {
       const response = await authorizedFetch(`/sessions/${encodeURIComponent(sessionId)}/messages`)

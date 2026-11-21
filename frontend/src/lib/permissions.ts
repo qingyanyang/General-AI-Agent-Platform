@@ -42,10 +42,35 @@ export function permissionsFromToken(token: string): ReadonlySet<string> {
   return permissions
 }
 
+/** Signed-in account with any platform permission. A new Auth0 user has none until an admin assigns a role. */
+export function hasAppAccess(permissions: ReadonlySet<string>): boolean {
+  return (
+    permissions.has(AGENTS_READ) ||
+    permissions.has(AGENTS_EXECUTE) ||
+    permissions.has(AGENTS_CONFIGURE) ||
+    permissions.has(AGENT_ACCESS_MANAGE) ||
+    permissions.has(PLATFORM_TECHNICAL)
+  )
+}
+
 export function canOpenManagement(permissions: ReadonlySet<string>): boolean {
   return (
     permissions.has(AGENTS_READ) ||
     permissions.has(AGENTS_CONFIGURE) ||
     permissions.has(AGENT_ACCESS_MANAGE)
   )
+}
+
+/** Display name for the Auth0 role implied by the access-token permissions. */
+export function accountRole(permissions: ReadonlySet<string>): string | null {
+  if (permissions.has(PLATFORM_TECHNICAL)) {
+    return 'Super Admin'
+  }
+  if (permissions.has(AGENTS_CONFIGURE) || permissions.has(AGENT_ACCESS_MANAGE)) {
+    return 'Admin'
+  }
+  if (permissions.has(AGENTS_READ) || permissions.has(AGENTS_EXECUTE)) {
+    return 'User'
+  }
+  return null
 }

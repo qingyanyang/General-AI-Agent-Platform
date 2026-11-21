@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isApiError } from '@/lib/errors'
 import { approvalFromEvent } from '@/lib/sse'
+import { pruneEmptyDraftSessions, titleFromMessage } from '@/lib/session-drafts'
+import { dropTranscript, readTranscript, writeTranscript } from '@/lib/transcript-cache'
 import { loadSessionsForAgent } from '@/lib/sessions'
 import type {
   Agent,
@@ -75,12 +77,15 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
   const [sessionCursor, setSessionCursor] = useState<string | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null)
+  /** When true, show the agent intro and ignore a stale session id in the URL. */
+  const [preferNewChat, setPreferNewChat] = useState(false)
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
   const [approval, setApproval] = useState<PendingApproval | null>(null)
   const [loadingSession, setLoadingSession] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [deciding, setDeciding] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [permissionError, setPermissionError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [sessionNotice, setSessionNotice] = useState<string | null>(null)
@@ -91,6 +96,8 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
   selectedAgentRef.current = selectedAgent
   const selectedSessionRef = useRef(selectedSession)
   selectedSessionRef.current = selectedSession
+  const preferNewChatRef = useRef(preferNewChat)
+  preferNewChatRef.current = preferNewChat
   const entriesRef = useRef(entries)
   entriesRef.current = entries
   const approvalRef = useRef(approval)
@@ -104,6 +111,7 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
   const streamGeneration = useRef(0)
   const openGeneration = useRef(0)
   const sessionLoadGeneration = useRef(0)
+  const prunedAgents = useRef(new Set<string>())
   const abortRef = useRef<AbortController | null>(null)
   const entrySeq = useRef(0)
   const draftIdRef = useRef<string | null>(null)
@@ -193,7 +201,22 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
         if (selectedAgentRef.current?.id !== agentId) {
           return
         }
-        setSessions((current) => (cursor ? mergeById(current, page.sessions) : page.sessions))
+        // Fresh loads: drop empty "New chat" drafts once per agent, not on every reload.
+        let sessions = page.sessions
+        if (cursor === null && !prunedAgents.current.has(agentId)) {
+          sessions = await pruneEmptyDraftSessions(page.sessions, {
+            listMessages: (sessionId) => client.listMessages(sessionId),
+            deleteSession: (sessionId) => client.deleteSession(sessionId),
+          })
+          prunedAgents.current.add(agentId)
+        }
+        if (!activeRef.current || sessionLoadGeneration.current !== generation) {
+          return
+        }
+        if (selectedAgentRef.current?.id !== agentId) {
+          return
+        }
+        setSessions((current) => (cursor ? mergeById(current, sessions) : sessions))
         setSessionCursor(page.nextCursor)
       } catch (error) {
         if (activeRef.current && sessionLoadGeneration.current === generation) {
@@ -209,17 +232,41 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
   )
 
   const selectAgent = useCallback(
-    (agent: Agent) => {
+    (agent: Agent, options?: { preferNewChat?: boolean }) => {
+      const switching = selectedAgentRef.current?.id !== agent.id
+      const landOnIntro = options?.preferNewChat ?? true
+      if (!switching) {
+        if (!landOnIntro) {
+          return
+        }
+        if (!preferNewChatRef.current || selectedSessionRef.current) {
+          preferNewChatRef.current = true
+          setPreferNewChat(true)
+          if (selectedSessionRef.current) {
+            detachStream()
+            selectedSessionRef.current = null
+            setSelectedSession(null)
+            setEntries([])
+            setApproval(null)
+          }
+        }
+        return
+      }
+      selectedAgentRef.current = agent
       setSelectedAgent(agent)
       setPermissionError(null)
       setActionError(null)
       setSessionNotice(null)
-      if (selectedSessionRef.current && selectedSessionRef.current.agent_id !== agent.id) {
+      // Match prototype: picking an agent lands on the empty intro (unless hydrating a
+      // deep-linked session). Session rows are created on first send, not on select.
+      if (switching || selectedSessionRef.current) {
         detachStream()
+        selectedSessionRef.current = null
         setSelectedSession(null)
         setEntries([])
         setApproval(null)
       }
+      setPreferNewChat(landOnIntro)
       void loadSessions(agent.id, null)
     },
     [detachStream, loadSessions],
@@ -293,34 +340,46 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
       }
       detachStream()
       const generation = ++openGeneration.current
+      const cached = readTranscript(session.id)
+      setPreferNewChat(false)
+      selectedSessionRef.current = session
       setSelectedSession(session)
-      setEntries([])
-      setApproval(null)
+      setEntries(cached ? historyToEntries(cached.messages) : [])
+      setApproval(cached?.approval ?? null)
       setPermissionError(null)
       setActionError(null)
       setSessionNotice(null)
-      setLoadingSession(true)
+      setLoadingSession(!cached)
       try {
         const [messages, approvals] = await Promise.all([
           client.listMessages(session.id),
           client.listApprovals(session.id),
         ])
+        const approval = approvals[0] ?? null
+        writeTranscript(session.id, { messages, approval })
         if (!activeRef.current || openGeneration.current !== generation) {
           return
         }
         setEntries(historyToEntries(messages))
-        setApproval(approvals[0] ?? null)
+        setApproval(approval)
       } catch (error) {
         if (!activeRef.current || openGeneration.current !== generation) {
+          return
+        }
+        if (isApiError(error) && error.status === 404) {
+          dropTranscript(session.id)
+          setSelectedSession(snapshot.session)
+          setEntries(snapshot.entries)
+          setApproval(snapshot.approval)
+          setSessionNotice(UNAVAILABLE_MESSAGE)
+          return
+        }
+        if (cached) {
           return
         }
         setSelectedSession(snapshot.session)
         setEntries(snapshot.entries)
         setApproval(snapshot.approval)
-        if (isApiError(error) && error.status === 404) {
-          setSessionNotice(UNAVAILABLE_MESSAGE)
-          return
-        }
         reportFailure(error)
       } finally {
         if (activeRef.current && openGeneration.current === generation) {
@@ -338,6 +397,8 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
         client.listMessages(sessionId),
         client.listApprovals(sessionId),
       ])
+      const approval = approvals[0] ?? null
+      writeTranscript(sessionId, { messages, approval })
       if (
         !activeRef.current ||
         selectedSessionRef.current?.id !== sessionId ||
@@ -346,22 +407,56 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
         return
       }
       setEntries(historyToEntries(messages))
-      setApproval(approvals[0] ?? null)
+      setApproval(approval)
     },
     [client],
   )
 
   const send = useCallback(
     async (content: string) => {
-      const session = selectedSessionRef.current
+      const agent = selectedAgentRef.current
       const trimmed = content.trim()
-      if (!session || streamingRef.current || approvalRef.current || !trimmed) {
+      if (!agent || streamingRef.current || approvalRef.current || !trimmed) {
         return
       }
       if (trimmed.length > MESSAGE_MAX_LENGTH) {
         setActionError(`A message can be at most ${MESSAGE_MAX_LENGTH} characters.`)
         return
       }
+
+      let session = selectedSessionRef.current
+      if (session) {
+        dropTranscript(session.id)
+      }
+      if (!session) {
+        if (creatingRef.current) {
+          return
+        }
+        creatingRef.current = true
+        setCreating(true)
+        setPermissionError(null)
+        setActionError(null)
+        try {
+          session = await client.createSession(agent.id, titleFromMessage(trimmed))
+          if (!activeRef.current || selectedAgentRef.current?.id !== agent.id) {
+            return
+          }
+          setPreferNewChat(false)
+          setSessions((current) => mergeById([session!], current))
+          setSelectedSession(session)
+          setEntries([])
+          setApproval(null)
+        } catch (error) {
+          reportFailure(error)
+          return
+        } finally {
+          creatingRef.current = false
+          if (activeRef.current) {
+            setCreating(false)
+          }
+        }
+      }
+
       const generation = ++streamGeneration.current
       abortRef.current?.abort()
       const controller = new AbortController()
@@ -386,7 +481,7 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
           controller.signal,
           (event) => {
             if (
-              !isStreamCurrent(generation, session.id) ||
+              !isStreamCurrent(generation, session!.id) ||
               stoppedGeneration.current === generation
             ) {
               return
@@ -478,6 +573,7 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
         return
       }
       decidingRef.current = true
+      dropTranscript(session.id)
       setDeciding(true)
       setPermissionError(null)
       setActionError(null)
@@ -532,31 +628,53 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
     [client, refreshOpenSession, reportFailure],
   )
 
-  const createChat = useCallback(async () => {
-    const agent = selectedAgentRef.current
-    if (!agent || creatingRef.current) {
-      return
-    }
-    creatingRef.current = true
-    setCreating(true)
-    setPermissionError(null)
-    setActionError(null)
-    try {
-      const session = await client.createSession(agent.id)
-      if (!activeRef.current || selectedAgentRef.current?.id !== agent.id) {
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      if (deletingSessionId) {
         return
       }
-      setSessions((current) => mergeById([session], current))
-      await openSession(session)
-    } catch (error) {
-      reportFailure(error)
-    } finally {
-      creatingRef.current = false
-      if (activeRef.current) {
-        setCreating(false)
+      setDeletingSessionId(sessionId)
+      setActionError(null)
+      try {
+        await client.deleteSession(sessionId)
+        dropTranscript(sessionId)
+        if (!activeRef.current) {
+          return
+        }
+        setSessions((current) => current.filter((session) => session.id !== sessionId))
+        if (selectedSessionRef.current?.id === sessionId) {
+          detachStream()
+          setPreferNewChat(true)
+          setSelectedSession(null)
+          setEntries([])
+          setApproval(null)
+        }
+      } catch (error) {
+        reportFailure(error)
+      } finally {
+        if (activeRef.current) {
+          setDeletingSessionId(null)
+        }
       }
+    },
+    [client, deletingSessionId, detachStream, reportFailure],
+  )
+
+  /** Prototype-aligned: New chat clears the open conversation; session is created on first send. */
+  const createChat = useCallback(() => {
+    const agent = selectedAgentRef.current
+    if (!agent) {
+      return
     }
-  }, [client, openSession, reportFailure])
+    detachStream()
+    setPreferNewChat(true)
+    setSelectedSession(null)
+    setEntries([])
+    setApproval(null)
+    setPermissionError(null)
+    setActionError(null)
+    setSessionNotice(null)
+  }, [detachStream])
 
   return {
     agents,
@@ -567,12 +685,14 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
     sessionCursor,
     loadingSessions,
     selectedSession,
+    preferNewChat,
     entries,
     approval,
     loadingSession,
     streaming,
     deciding,
     creating,
+    deletingSessionId,
     permissionError,
     actionError,
     sessionNotice,
@@ -590,6 +710,7 @@ export function useChatWorkspace(client: ChatClient, onUnauthorized: () => void)
     selectAgent,
     openSession,
     createChat,
+    deleteSession,
     send,
     stop,
     decide,

@@ -1,0 +1,302 @@
+"filename", "language", "YAML", "Shell Script", "TOML", "Markdown", "JavaScript", "Python", "Ini", "pip requirements", "Docker", "JSON", "Skill", "Ignore", "TypeScript", "TypeScript JSX", "PostCSS", "JSON with Comments", "HTML", "XML", "Bicep", "comment", "blank", "total"
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.agents/skills/source-command-create-pr/SKILL.md", "Skill", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 36
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.agents/skills/source-command-fix-pr/SKILL.md", "Skill", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 67, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 100
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.agents/skills/source-command-implement-issue/SKILL.md", "Skill", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 36
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.agents/skills/source-command-review-pr/SKILL.md", "Skill", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 93, 0, 0, 0, 0, 0, 0, 0, 0, 0, 44, 137
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.codex/config.toml", "TOML", 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.cursor/commands/create-pr.md", "Markdown", 0, 0, 0, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 25
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.cursor/commands/fix-pr.md", "Markdown", 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 29, 89
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.cursor/commands/implement-issue.md", "Markdown", 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 25
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.cursor/commands/review-pr.md", "Markdown", 0, 0, 0, 86, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 126
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.cursor/mcp.json", "JSON with Comments", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 8
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.github/workflows/backend-cd.yml", "YAML", 155, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 36, 192
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.github/workflows/frontend-cd.yml", "YAML", 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 12, 89
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.github/workflows/infra-cd.yml", "YAML", 118, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 143
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/.github/workflows/infra-ci.yml", "YAML", 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 113
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/README.md", "Markdown", 0, 0, 0, 147, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 197
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/.dockerignore", "Ignore", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/Dockerfile", "Docker", 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 13
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/README.md", "Markdown", 0, 0, 0, 344, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 143, 487
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic.ini", "Ini", 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 43
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/env.py", "Python", 0, 0, 0, 0, 0, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 23, 90
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20260309_0001_create_chat_sessions.py", "Python", 0, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 11, 80
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261110_0002_widen_chat_sessions_user_id.py", "Python", 0, 0, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 11, 47
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261110_0003_create_agent_access_grants.py", "Python", 0, 0, 0, 0, 0, 53, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 11, 72
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261111_0004_create_agents.py", "Python", 0, 0, 0, 0, 0, 54, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 11, 74
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261111_0005_agent_configuration.py", "Python", 0, 0, 0, 0, 0, 91, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 13, 114
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261111_0006_agent_executions.py", "Python", 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 11, 83
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261112_0007_agent_skill_names.py", "Python", 0, 0, 0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 11, 38
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261112_0008_human_approval.py", "Python", 0, 0, 0, 0, 0, 54, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 11, 73
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261118_0009_directory_users.py", "Python", 0, 0, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 11, 42
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261119_0010_groups.py", "Python", 0, 0, 0, 0, 0, 83, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 11, 104
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261119_0011_agent_access_config.py", "Python", 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 11, 151
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261120_0012_agent_instruction_skills.py", "Python", 0, 0, 0, 0, 0, 47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 11, 70
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/alembic/versions/20261120_0013_directory_profiles.py", "Python", 0, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 11, 77
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/__init__.py", "Python", 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 6
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/checkpointer.py", "Python", 0, 0, 0, 0, 0, 86, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 26, 127
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/errors.py", "Python", 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 8, 18
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/graph.py", "Python", 0, 0, 0, 0, 0, 299, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 47, 378
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/instructions.py", "Python", 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 6, 15
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/messages.py", "Python", 0, 0, 0, 0, 0, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 11, 61
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/runtime.py", "Python", 0, 0, 0, 0, 0, 652, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 55, 68, 775
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/skills/__init__.py", "Python", 0, 0, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 32
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/skills/builtins.py", "Python", 0, 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4, 32
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/skills/factory.py", "Python", 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 5, 15
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/skills/prompt.py", "Python", 0, 0, 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 10, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/skills/registry.py", "Python", 0, 0, 0, 0, 0, 78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 29, 115
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/state.py", "Python", 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 6, 12
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tool_policy.py", "Python", 0, 0, 0, 0, 0, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 25, 96
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/__init__.py", "Python", 0, 0, 0, 0, 0, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 6, 47
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/builtins.py", "Python", 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 8, 22
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/errors.py", "Python", 0, 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 16, 38
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/load_skill.py", "Python", 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 8, 52
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/mcp.py", "Python", 0, 0, 0, 0, 0, 379, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 70, 481
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tools/registry.py", "Python", 0, 0, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 122
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/agents/tracing.py", "Python", 0, 0, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 17, 104
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/deps.py", "Python", 0, 0, 0, 0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 21, 166
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/execution.py", "Python", 0, 0, 0, 0, 0, 43, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 8, 61
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/execution_records.py", "Python", 0, 0, 0, 0, 0, 228, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 27, 269
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/router.py", "Python", 0, 0, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 25
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/agent_access.py", "Python", 0, 0, 0, 0, 0, 83, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 14, 98
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/agents.py", "Python", 0, 0, 0, 0, 0, 665, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 63, 739
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/catalog.py", "Python", 0, 0, 0, 0, 0, 36, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 10, 49
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/executions.py", "Python", 0, 0, 0, 0, 0, 55, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 10, 68
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/groups.py", "Python", 0, 0, 0, 0, 0, 221, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 22, 244
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/health.py", "Python", 0, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 16
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/sessions.py", "Python", 0, 0, 0, 0, 0, 752, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 62, 839
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/skills.py", "Python", 0, 0, 0, 0, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 10, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/api/routes/users.py", "Python", 0, 0, 0, 0, 0, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 16, 129
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/auth.py", "Python", 0, 0, 0, 0, 0, 260, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 46, 47, 353
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/config.py", "Python", 0, 0, 0, 0, 0, 175, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 34, 233
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/database.py", "Python", 0, 0, 0, 0, 0, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 13, 51
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/errors.py", "Python", 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 45
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/logging.py", "Python", 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 7, 29
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/mcp_allowlist.py", "Python", 0, 0, 0, 0, 0, 85, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 20, 114
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/core/permissions.py", "Python", 0, 0, 0, 0, 0, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 6, 48
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/main.py", "Python", 0, 0, 0, 0, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 57
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/__init__.py", "Python", 0, 0, 0, 0, 0, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 23
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/agent.py", "Python", 0, 0, 0, 0, 0, 91, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 14, 108
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/agent_access_grant.py", "Python", 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8, 47
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/agent_execution.py", "Python", 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 11, 52
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/agent_group_assignment.py", "Python", 0, 0, 0, 0, 0, 41, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 8, 54
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/agent_instruction_skill.py", "Python", 0, 0, 0, 0, 0, 34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8, 43
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/base.py", "Python", 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 9, 19
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/chat_session.py", "Python", 0, 0, 0, 0, 0, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8, 48
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/directory_user.py", "Python", 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 8, 29
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/group.py", "Python", 0, 0, 0, 0, 0, 84, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 13, 98
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/models/session_run_gate.py", "Python", 0, 0, 0, 0, 0, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 9, 33
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent.py", "Python", 0, 0, 0, 0, 0, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 24, 102
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent_access.py", "Python", 0, 0, 0, 0, 0, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 11, 35
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent_access_config.py", "Python", 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 13, 45
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent_config.py", "Python", 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 19, 97
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent_execution.py", "Python", 0, 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 12, 40
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/agent_instruction_skills.py", "Python", 0, 0, 0, 0, 0, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 22, 101
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/approval.py", "Python", 0, 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 12, 29
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/catalog.py", "Python", 0, 0, 0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 15, 34
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/chat_message.py", "Python", 0, 0, 0, 0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 36, 118
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/chat_session.py", "Python", 0, 0, 0, 0, 0, 41, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 14, 56
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/groups.py", "Python", 0, 0, 0, 0, 0, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 25, 82
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/skill.py", "Python", 0, 0, 0, 0, 0, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 17, 39
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/schemas/users.py", "Python", 0, 0, 0, 0, 0, 34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 18, 53
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/agent_access.py", "Python", 0, 0, 0, 0, 0, 368, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 34, 67, 469
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/agent_access_config.py", "Python", 0, 0, 0, 0, 0, 188, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31, 47, 266
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/agent_executions.py", "Python", 0, 0, 0, 0, 0, 204, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 31, 251
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/agent_instruction_skills.py", "Python", 0, 0, 0, 0, 0, 162, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 29, 206
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/agents.py", "Python", 0, 0, 0, 0, 0, 386, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 72, 483
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/auth0_management.py", "Python", 0, 0, 0, 0, 0, 198, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 30, 237
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/chat_messages.py", "Python", 0, 0, 0, 0, 0, 76, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 13, 93
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/chat_sessions.py", "Python", 0, 0, 0, 0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 27, 167
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/directory_users.py", "Python", 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 17, 131
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/groups.py", "Python", 0, 0, 0, 0, 0, 331, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19, 65, 415
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/session_gates.py", "Python", 0, 0, 0, 0, 0, 222, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 29, 264
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/app/services/user_admin.py", "Python", 0, 0, 0, 0, 0, 180, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 28, 213
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/auth0/post-login-verify-email.js", "JavaScript", 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 1, 27
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 1, 7
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/__main__.py", "Python", 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8, 39
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/baseline.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 31
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/dataset.py", "Python", 0, 0, 0, 0, 0, 161, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 23, 186
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/datasets/agent_core.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 126
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/grading.py", "Python", 0, 0, 0, 0, 0, 136, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 27, 170
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/runner.py", "Python", 0, 0, 0, 0, 0, 307, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18, 42, 367
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/scripted.py", "Python", 0, 0, 0, 0, 0, 37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 12, 51
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/evals/target.py", "Python", 0, 0, 0, 0, 0, 125, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 17, 144
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/pyproject.toml", "TOML", 0, 0, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 26
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/requirements.txt", "pip requirements", 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 18
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/scripts/dev.sh", "Shell Script", 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 5, 15
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/auth_helpers.py", "Python", 0, 0, 0, 0, 0, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 19, 120
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/chat_helpers.py", "Python", 0, 0, 0, 0, 0, 205, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 23, 234
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/conftest.py", "Python", 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 23, 130
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/fakes.py", "Python", 0, 0, 0, 0, 0, 84, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 16, 103
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_access.py", "Python", 0, 0, 0, 0, 0, 426, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 62, 491
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_access_config.py", "Python", 0, 0, 0, 0, 0, 483, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 68, 553
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_configuration.py", "Python", 0, 0, 0, 0, 0, 438, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 65, 504
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_crud.py", "Python", 0, 0, 0, 0, 0, 509, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 71, 592
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_executions.py", "Python", 0, 0, 0, 0, 0, 693, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 100, 801
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agent_instruction_skills.py", "Python", 0, 0, 0, 0, 0, 638, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 73, 714
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_agents.py", "Python", 0, 0, 0, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 61, 295
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_audience_authorization.py", "Python", 0, 0, 0, 0, 0, 487, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 63, 551
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_auth.py", "Python", 0, 0, 0, 0, 0, 733, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 135, 871
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_catalog.py", "Python", 0, 0, 0, 0, 0, 41, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 17, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_checkpointer.py", "Python", 0, 0, 0, 0, 0, 311, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 71, 387
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_checkpointer_integration.py", "Python", 0, 0, 0, 0, 0, 105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 24, 139
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_config.py", "Python", 0, 0, 0, 0, 0, 118, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 38, 156
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_directory_users.py", "Python", 0, 0, 0, 0, 0, 155, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 33, 189
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_evaluation.py", "Python", 0, 0, 0, 0, 0, 265, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 50, 316
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_groups.py", "Python", 0, 0, 0, 0, 0, 457, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 74, 533
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_health.py", "Python", 0, 0, 0, 0, 0, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 34
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_human_approval.py", "Python", 0, 0, 0, 0, 0, 701, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 62, 765
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_mcp_integration.py", "Python", 0, 0, 0, 0, 0, 206, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 47, 259
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_mcp_tools.py", "Python", 0, 0, 0, 0, 0, 366, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 65, 432
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_message_stream.py", "Python", 0, 0, 0, 0, 0, 517, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 81, 603
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_messages.py", "Python", 0, 0, 0, 0, 0, 330, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 67, 398
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_migrations.py", "Python", 0, 0, 0, 0, 0, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 23, 96
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_rbac.py", "Python", 0, 0, 0, 0, 0, 297, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 51, 349
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_session_gate_postgres.py", "Python", 0, 0, 0, 0, 0, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 18, 175
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_sessions.py", "Python", 0, 0, 0, 0, 0, 218, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 48, 267
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_skills.py", "Python", 0, 0, 0, 0, 0, 472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 66, 540
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_tool_authorization.py", "Python", 0, 0, 0, 0, 0, 455, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 73, 535
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_tool_registry.py", "Python", 0, 0, 0, 0, 0, 164, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 36, 202
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_tracing.py", "Python", 0, 0, 0, 0, 0, 190, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 39, 233
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/backend/tests/test_user_admin.py", "Python", 0, 0, 0, 0, 0, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 23, 174
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/.oxlintrc.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 9
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/PRODUCTION-UI-DEVIATIONS.md", "Markdown", 0, 0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/README.md", "Markdown", 0, 0, 0, 37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 54
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/docs/issue6-screenshots/README.md", "Markdown", 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 26
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/eslint.config.js", "JavaScript", 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 29
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/index.html", "HTML", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 0, 0, 0, 1, 14
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/package-lock.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 6043, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6044
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/package.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 50
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/PRODUCTION-FOLLOW-UP.md", "Markdown", 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 38
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/index.html", "HTML", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 1, 13
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat-store.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 703, 0, 0, 0, 0, 0, 0, 15, 39, 757
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/composer.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 493, 0, 0, 0, 0, 0, 1, 27, 521
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/markdown.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 143, 0, 0, 0, 0, 0, 6, 7, 156
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/media-ui.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 202, 0, 0, 0, 0, 0, 1, 10, 213
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/media.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 623, 0, 0, 0, 0, 0, 0, 6, 55, 684
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/sidebar.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 312, 0, 0, 0, 0, 0, 1, 13, 326
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/chat/transcript.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 300, 0, 0, 0, 0, 0, 1, 20, 321
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/controls-panel.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 221, 0, 0, 0, 0, 0, 1, 15, 237
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/dialogs.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 259, 0, 0, 0, 0, 0, 1, 13, 273
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/format.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 2, 20
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/hooks.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 142, 0, 0, 0, 0, 0, 0, 11, 19, 172
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/main.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 4, 6, 73
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/chat-client.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 536, 0, 0, 0, 0, 0, 0, 9, 42, 587
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/chat-data.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 186, 0, 0, 0, 0, 0, 0, 5, 12, 203
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/client.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 648, 0, 0, 0, 0, 0, 0, 13, 53, 714
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/configuration-draft.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 214, 0, 0, 0, 0, 0, 0, 2, 27, 243
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/data.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 133, 0, 0, 0, 0, 0, 0, 10, 15, 158
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/effective-access.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 117, 0, 0, 0, 0, 0, 0, 2, 12, 131
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/options.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 91, 0, 0, 0, 0, 0, 0, 4, 19, 114
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/platform-permissions.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 9, 1, 15
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/product-state.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 348, 0, 0, 0, 0, 0, 0, 5, 38, 391
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/roles.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 129, 0, 0, 0, 0, 0, 0, 12, 9, 150
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/users-api.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 795, 0, 0, 0, 0, 0, 0, 11, 48, 854
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/users-data.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 291, 0, 0, 0, 0, 0, 0, 15, 21, 327
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/mock/users-state.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 119, 0, 0, 0, 0, 0, 0, 1, 24, 144
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/access.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 329, 0, 0, 0, 0, 0, 2, 19, 350
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/chat.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 429, 0, 0, 0, 0, 0, 2, 31, 462
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/configuration-tab.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 318, 0, 0, 0, 0, 0, 1, 17, 336
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/details-section.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 185, 0, 0, 0, 0, 0, 1, 11, 197
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/directory-layout.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 95, 0, 0, 0, 0, 0, 2, 9, 106
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/groups.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 909, 0, 0, 0, 0, 0, 2, 43, 954
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/settings.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 254, 0, 0, 0, 0, 0, 1, 18, 273
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/simple-pages.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 1, 3, 28
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/skills-section.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 166, 0, 0, 0, 0, 0, 1, 13, 180
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/technical-extras.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 493, 0, 0, 0, 0, 0, 1, 27, 521
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/pages/users.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 998, 0, 0, 0, 0, 0, 2, 60, 1060
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/providers.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 163, 0, 0, 0, 0, 0, 1, 16, 180
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/publish-agent-draft.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90, 0, 0, 0, 0, 0, 0, 0, 8, 98
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/routes.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 1, 9, 37
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/shell.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 373, 0, 0, 0, 0, 0, 7, 23, 403
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/styles.css", "PostCSS", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 0, 0, 0, 0, 1, 8, 57
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/ui.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 885, 0, 0, 0, 0, 0, 2, 44, 931
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/src/user-label.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 1, 3, 14
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/tsconfig.json", "JSON with Comments", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 1, 13
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/prototypes/agent-management/vite.config.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 3, 2, 22
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/public/favicon.svg", "XML", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/public/staticwebapp.config.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 10
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/App.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 293, 0, 0, 0, 0, 0, 0, 23, 316
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/chat/chat-provider.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 0, 0, 0, 0, 0, 0, 7, 42
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/chat/markdown-message.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 2, 6
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/chat/use-chat-workspace.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 684, 0, 0, 0, 0, 0, 0, 5, 31, 720
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/chat/workspace.test.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 693, 0, 0, 0, 0, 0, 0, 39, 732
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/chat/workspace.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1184, 0, 0, 0, 0, 0, 5, 54, 1243
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/access-panel.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 475, 0, 0, 0, 0, 0, 1, 24, 500
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/agent-settings-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 677, 0, 0, 0, 0, 0, 2, 29, 708
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/agents-list-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 287, 0, 0, 0, 0, 0, 0, 10, 297
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/configuration-form.test.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 0, 0, 0, 0, 0, 0, 6, 20
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/configuration-form.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 329, 0, 0, 0, 0, 0, 1, 17, 347
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/group-detail-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 461, 0, 0, 0, 0, 0, 0, 22, 483
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/groups-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 242, 0, 0, 0, 0, 0, 0, 14, 256
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/instruction-skills-panel.test.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 8, 100
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/instruction-skills-panel.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 359, 0, 0, 0, 0, 0, 2, 29, 390
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/management-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 627, 0, 0, 0, 0, 0, 2, 21, 650
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/management.test.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 791, 0, 0, 0, 0, 0, 0, 39, 830
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/use-management.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 916, 0, 0, 0, 0, 0, 0, 2, 43, 961
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/user-detail-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 183, 0, 0, 0, 0, 0, 0, 8, 191
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/manage/users-page.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 322, 0, 0, 0, 0, 0, 0, 14, 336
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/shell/app-shell.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 615, 0, 0, 0, 0, 0, 0, 29, 644
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/shell/use-app-shell.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 3, 8
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/ui/button.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65, 0, 0, 0, 0, 0, 2, 9, 76
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/components/ui/primitives.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 577, 0, 0, 0, 0, 0, 2, 27, 606
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/hooks/use-instruction-eligibility.test.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 8, 108
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/hooks/use-instruction-eligibility.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 98, 0, 0, 0, 0, 0, 0, 4, 12, 114
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/index.css", "PostCSS", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 0, 0, 0, 0, 1, 8, 57
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/agent-drafts.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 51, 0, 0, 0, 0, 0, 0, 0, 6, 57
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/agent-drafts.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 136, 0, 0, 0, 0, 0, 0, 2, 19, 157
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/api.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 115, 0, 0, 0, 0, 0, 0, 0, 13, 128
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/api.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 291, 0, 0, 0, 0, 0, 0, 1, 20, 312
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/auth-config.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0, 4, 26
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/chat-preference.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 3, 7, 40
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/errors.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 0, 0, 0, 0, 5, 41
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/execution-status.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 6, 44
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/instruction-eligibility-cache.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 6, 24
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/instruction-eligibility.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 10, 1, 17
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/instruction-skills.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0, 0, 0, 6, 44
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/instruction-skills.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 2, 12, 85
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/management.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 95, 0, 0, 0, 0, 0, 0, 0, 9, 104
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/management.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 838, 0, 0, 0, 0, 0, 0, 0, 67, 905
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/permissions.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 7, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/permissions.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65, 0, 0, 0, 0, 0, 0, 6, 6, 77
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/project-link.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 3, 19
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/project-link.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19, 0, 0, 0, 0, 0, 0, 1, 1, 21
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/read-cache.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 142, 0, 0, 0, 0, 0, 0, 0, 26, 168
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/routes.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 1, 9, 35
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/session-drafts.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 3, 31
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/session-drafts.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 0, 0, 0, 6, 7, 58
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/sessions.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 4, 56
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/sessions.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 4, 4, 32
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/sse.test.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 83, 0, 0, 0, 0, 0, 0, 0, 13, 96
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/sse.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 236, 0, 0, 0, 0, 0, 0, 0, 17, 253
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/transcript-cache.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 44, 0, 0, 0, 0, 0, 0, 0, 9, 53
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/types.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 87, 0, 0, 0, 0, 0, 0, 0, 11, 98
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/lib/utils.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2, 7
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/main.tsx", "TypeScript JSX", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 4, 36
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/test/setup.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 1, 2, 12
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/src/vite-env.d.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 3, 3, 16
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/tsconfig.app.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 32
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/tsconfig.json", "JSON with Comments", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 1, 8
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/tsconfig.node.json", "JSON", 0, 0, 0, 0, 0, 0, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 27
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/frontend/vite.config.ts", "TypeScript", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 1, 2, 23
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/README.md", "Markdown", 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 67, 267
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/bootstrap/main.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19, 0, 6, 25
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/main.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 3, 43, 226
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/app-insights.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 22, 0, 6, 28
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/container-app-env.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28, 2, 7, 37
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/container-app.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 267, 4, 46, 317
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/identity-rbac.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 6, 26
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/log-analytics.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 2, 7, 33
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/managed-identity.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 0, 5, 20
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/static-web-app.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28, 0, 6, 34
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/modules/storage.bicep", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 81, 0, 10, 91
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/parameters/demo.bicepparam", "Bicep", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 18, 9, 59
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/infra/scripts/validate-deploy-secrets.sh", "Shell Script", 0, 38, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 17, 68
+"/Users/yangqingyan/Desktop/Enterprise-AI-Agent-Platform/scripts/infra/deploy.sh", "Shell Script", 0, 74, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 32, 139
+"Total", "-", 447, 120, 24, 996, 42, 21111, 32, 16, 7, 6313, 213, 6, 9692, 16071, 96, 27, 25, 1, 716, 1296, 6293, 63544

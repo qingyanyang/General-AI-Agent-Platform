@@ -263,6 +263,22 @@ def test_invalid_claims_return_401(
     assert response.headers.get("www-authenticate") == "Bearer"
 
 
+@pytest.mark.parametrize("claim", ["iat", "nbf"])
+@pytest.mark.parametrize(("seconds_ahead", "expected_status"), [(3, 200), (30, 401)])
+def test_agent_list_tolerates_small_clock_skew(
+    auth_api_client: AuthClientBundle,
+    claim: str,
+    seconds_ahead: int,
+    expected_status: int,
+) -> None:
+    client, private_key, _jwk, _fetch_log = auth_api_client
+    token = _token(private_key, extra_claims={claim: int(time.time()) + seconds_ahead})
+
+    response = client.get("/agents?limit=100", headers=bearer_headers(token))
+
+    assert response.status_code == expected_status, response.text
+
+
 def test_bad_signature_returns_401(
     auth_api_client: tuple[TestClient, rsa.RSAPrivateKey, dict[str, Any], list[dict[str, Any]]],
 ) -> None:
@@ -722,8 +738,15 @@ def test_valid_token_records_subject_without_profile_claims(
     assert [row.user_id for row in rows] == ["auth0|directory-user"]
     assert rows[0].first_seen_at.replace(tzinfo=UTC) == datetime(2026, 1, 1, tzinfo=UTC)
     assert rows[0].last_seen_at.replace(tzinfo=UTC) == datetime(2026, 1, 2, tzinfo=UTC)
+    assert rows[0].email is None
+    assert rows[0].display_name is None
     assert list(DirectoryUser.__table__.columns.keys()) == [
         "user_id",
+        "email",
+        "display_name",
+        "email_verified",
+        "role",
+        "status",
         "first_seen_at",
         "last_seen_at",
     ]
@@ -786,7 +809,7 @@ def test_directory_write_failure_returns_503_without_business_work(
         calls["model"] += 1
         raise AssertionError("model invoked")
 
-    def _fail(_user_id: str) -> None:
+    def _fail(_user_id: str, **_kwargs: object) -> None:
         raise directory_users.DirectoryPersistenceError("disk full")
 
     monkeypatch.setattr(

@@ -20,7 +20,7 @@ from app.core.permissions import (
     PERM_AGENTS_READ,
     PERM_PLATFORM_TECHNICAL,
 )
-from app.models.agent import Agent
+from app.models.agent import Agent, AgentAudienceMode, AgentAuthorizationMode
 from app.models.agent_instruction_skill import AgentInstructionSkill
 from app.models.directory_user import DirectoryUser
 from app.models.group import GroupDesignation
@@ -122,6 +122,12 @@ def _put_access_config(
         headers=headers(ADMIN),
     )
     assert response.status_code == 200, response.text
+
+    activated = api_client.post(
+        f"/agents/{agent_id}/access-config/activate",
+        headers=headers(ADMIN),
+    )
+    assert activated.status_code == 200, activated.text
 
 
 def _put_instructions(
@@ -236,11 +242,17 @@ def test_owning_group_leader_can_read_and_replace(
         )
         assert got.status_code == 200
         assert len(got.json()["items"]) == 2
+        path = f"/agents/{AGENT_ID}/knowledge-references"
+        document = {"id": "0ed4e036-bb57-4d8f-86d2-c4a3ff46c667", "name": "Guide.txt", "size": "42 B"}
+        assert api_client.get(path, headers=headers(LEADER)).json() == {"items": []}
+        saved = api_client.put(path, json={"items": [document]}, headers=headers(LEADER))
+        assert saved.status_code == 200, saved.text
+        assert api_client.get(path, headers=headers(LEADER)).json() == {"items": [document]}
     finally:
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_member_unrelated_and_audience_only_leader_denied(
+def test_audience_only_leader_can_edit_but_member_cannot(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
@@ -258,34 +270,29 @@ def test_member_unrelated_and_audience_only_leader_denied(
         group_ids=[owning, audience],
     )
 
-    for user_id in (MEMBER, OTHER_LEADER):
+    for user_id, expected in ((MEMBER, 403), (OTHER_LEADER, 200)):
         api_client.app.dependency_overrides[get_current_user] = _as_user(
             user_id,
             PERM_AGENTS_READ,
             PERM_AGENTS_EXECUTE,
         )
         try:
-            assert (
-                api_client.get(
-                    f"/agents/{AGENT_ID}/instruction-skills",
-                    headers=headers(user_id),
-                ).status_code
-                == 403
+            instructions = f"/agents/{AGENT_ID}/instruction-skills"
+            assert api_client.get(instructions, headers=headers(user_id)).status_code == expected
+            response = _put_instructions(
+                api_client, agent_id=AGENT_ID, items=_sample_items(), user_id=user_id,
             )
-            assert (
-                _put_instructions(
-                    api_client,
-                    agent_id=AGENT_ID,
-                    items=_sample_items(),
-                    user_id=user_id,
-                ).status_code
-                == 403
-            )
+            assert response.status_code == expected, response.text
+
+            knowledge = f"/agents/{AGENT_ID}/knowledge-references"
+            assert api_client.get(knowledge, headers=headers(user_id)).status_code == expected
+            response = api_client.put(knowledge, headers=headers(user_id), json={"items": []})
+            assert response.status_code == expected, response.text
         finally:
             api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_null_owning_group_denies_leader(
+def test_leader_can_edit_agent_without_an_owning_group(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
@@ -311,8 +318,36 @@ def test_null_owning_group_denies_leader(
                 f"/agents/{AGENT_ID}/instruction-skills",
                 headers=headers(LEADER),
             ).status_code
-            == 403
+            == 200
         )
+    finally:
+        api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
+
+
+@pytest.mark.parametrize("access", ["company", "legacy_view", "legacy_execute_only"])
+def test_leader_edit_access_uses_agent_view_permissions(
+    api_client: TestClient, db_session: Session, access: str,
+) -> None:
+    _seed_directory(db_session, ADMIN, LEADER)
+    agent = seed_agent(db_session, AGENT_ID)
+    group_id = _create_group(api_client, "Leadership")
+    _put_membership(api_client, group_id, LEADER, GroupDesignation.LEADER.value)
+
+    if access == "company":
+        agent.authorization_mode = AgentAuthorizationMode.AUDIENCE.value
+        agent.audience_mode = AgentAudienceMode.COMPANY.value
+        db_session.commit()
+    else:
+        seed_agent_grant(db_session, LEADER, AGENT_ID, can_view=access == "legacy_view")
+
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        LEADER, PERM_AGENTS_READ, PERM_AGENTS_EXECUTE,
+    )
+    try:
+        expected = 403 if access == "legacy_execute_only" else 200
+        for resource in ("instruction-skills", "knowledge-references"):
+            response = api_client.get(f"/agents/{AGENT_ID}/{resource}", headers=headers(LEADER))
+            assert response.status_code == expected, response.text
     finally:
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
@@ -367,7 +402,7 @@ def test_configure_alone_and_technical_alone_denied(
         api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
-def test_reassign_owning_group_removes_former_leader(
+def test_leader_loses_edit_access_when_agent_view_is_revoked(
     api_client: TestClient,
     db_session: Session,
 ) -> None:
@@ -407,6 +442,13 @@ def test_reassign_owning_group_removes_former_leader(
         agent_id=AGENT_ID,
         owning_group_id=group_b,
         group_ids=[group_a, group_b],
+    )
+
+    _put_access_config(
+        api_client,
+        agent_id=AGENT_ID,
+        owning_group_id=group_b,
+        group_ids=[group_b],
     )
 
     api_client.app.dependency_overrides[get_current_user] = _as_user(

@@ -31,10 +31,10 @@ def test_settings_and_models_import_first_in_fresh_interpreter(module: str) -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_alembic_has_single_head_at_instruction_skills() -> None:
+def test_alembic_has_single_head_at_knowledge_references() -> None:
     result = _run("-m", "alembic", "heads")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["20261120_0012", "(head)"]
+    assert result.stdout.split() == ["20261121_0014", "(head)"]
 
 
 def test_skill_names_migration_adds_not_null_column_with_empty_default() -> None:

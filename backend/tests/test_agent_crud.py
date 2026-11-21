@@ -12,7 +12,7 @@ from app.agents.tools import create_default_registry
 from app.api.deps import get_current_user
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
-from app.core.permissions import PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
+from app.core.permissions import PERM_AGENTS_CONFIGURE, PERM_AGENTS_EXECUTE, PERM_AGENTS_READ
 from app.models.agent import Agent
 from app.models.agent_access_grant import AgentAccessGrant
 from app.services import agent_access as access_service
@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
+from tests.auth_helpers import stub_get_current_user
 from tests.chat_helpers import (
     USER,
     create_session,
@@ -38,6 +39,16 @@ from tests.fakes import ScriptedChatModel
 
 def _configure_headers(user_id: str = USER) -> dict[str, str]:
     return headers(user_id)
+
+
+def _as_user(*permissions: str):
+    perms = frozenset(permissions)
+
+    def _current(request: Request) -> AuthenticatedUser:
+        user_id = request.headers.get("x-user-id", USER)
+        return AuthenticatedUser(user_id=user_id, permissions=perms)
+
+    return _current
 
 
 def test_create_list_get_update_deactivate(
@@ -216,8 +227,12 @@ def test_patch_rejects_blank_name_and_unknown_fields(
 def test_get_without_view_is_404(api_client: TestClient, db_session: Session) -> None:
     seed_agent(db_session, "secret")
     seed_agent_grant(db_session, USER, "default", can_view=True)
-    response = api_client.get("/agents/secret", headers=_configure_headers())
-    assert response.status_code == 404
+    api_client.app.dependency_overrides[get_current_user] = _as_user(PERM_AGENTS_READ)
+    try:
+        response = api_client.get("/agents/secret", headers=_configure_headers())
+        assert response.status_code == 404
+    finally:
+        api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
 def test_update_without_configure_is_403(
@@ -232,12 +247,19 @@ def test_update_without_configure_is_403(
         can_configure=False,
         can_execute=True,
     )
-    response = api_client.patch(
-        "/agents/locked",
-        json={"name": "Nope"},
-        headers=_configure_headers(),
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        PERM_AGENTS_READ,
+        PERM_AGENTS_CONFIGURE,
     )
-    assert response.status_code == 403
+    try:
+        response = api_client.patch(
+            "/agents/locked",
+            json={"name": "Nope"},
+            headers=_configure_headers(),
+        )
+        assert response.status_code == 403
+    finally:
+        api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
 def test_create_agent_does_not_write_creator_grant(
@@ -294,13 +316,20 @@ def test_inactive_without_execute_is_403_not_409(
     db_session: Session,
 ) -> None:
     seed_agent(db_session, "quiet", status="inactive")
-    denied = api_client.post(
-        "/sessions",
-        json={"agent_id": "quiet"},
-        headers=headers(),
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        PERM_AGENTS_READ,
+        PERM_AGENTS_EXECUTE,
     )
-    assert denied.status_code == 403
-    assert denied.json()["detail"] == "Agent access denied"
+    try:
+        denied = api_client.post(
+            "/sessions",
+            json={"agent_id": "quiet"},
+            headers=headers(),
+        )
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "Agent access denied"
+    finally:
+        api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
 def test_owned_session_missing_execute_inactive_is_403(
@@ -325,13 +354,20 @@ def test_owned_session_missing_execute_inactive_is_403(
         can_execute=False,
     )
     with_saver(api_client)
-    denied = api_client.post(
-        f"/sessions/{created['id']}/messages",
-        json={"content": "hi"},
-        headers=headers(),
+    api_client.app.dependency_overrides[get_current_user] = _as_user(
+        PERM_AGENTS_READ,
+        PERM_AGENTS_EXECUTE,
     )
-    assert denied.status_code == 403
-    assert denied.json()["detail"] == "Agent access denied"
+    try:
+        denied = api_client.post(
+            f"/sessions/{created['id']}/messages",
+            json={"content": "hi"},
+            headers=headers(),
+        )
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "Agent access denied"
+    finally:
+        api_client.app.dependency_overrides[get_current_user] = stub_get_current_user
 
 
 def test_patch_oversized_agent_id_is_404_not_500(
