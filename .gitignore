@@ -18,3 +18,4 @@ infra/**/*.json
 .agents/
 .codex/
 .VSCodeCounter/
+.ruff_cache/
