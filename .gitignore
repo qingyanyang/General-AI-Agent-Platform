@@ -15,3 +15,6 @@ infra/**/*.json
 **/.pytest_cache/
 **/.mypy_cache/
 **/coverage/
+.agents/
+.codex/
+.VSCodeCounter/
